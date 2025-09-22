@@ -24,30 +24,18 @@ public class CatalogManager {
         loadCatalog();
     }
 
-    public void createTable(TableSchema schema) {
-        tables.put(schema.getName(), schema);
-        saveCatalog();
-        // also create empty .tbl file
-        try {
-            new File(schema.getFilePath()).createNewFile();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+    public void registerTable(TableSchema tSchema) {
+        tables.put(tSchema.getName(), tSchema);
+        saveTables();
     }
 
     public TableSchema getTableSchema(String name) {
         return tables.get(name);
     }
 
-    public void createIndex(IndexSchema schema) {
-        indexes.put(schema.getName(), schema);
-        saveCatalog();
-        // also create empty .idx file
-        try {
-            new File(schema.getFilePath()).createNewFile();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+    public void registerIndex(IndexSchema iSchema) {
+        indexes.put(iSchema.getName(), iSchema);
+        saveIndexes();
     }
 
     public IndexSchema getIndexSchema(String name) {
@@ -70,9 +58,20 @@ public class CatalogManager {
     }
 
     private void saveCatalog() {
-        try (FileWriter tw = new FileWriter(tablesFile);
-             FileWriter iw = new FileWriter(indexesFile)) {
+        saveTables();
+        saveIndexes();
+    }
+
+    private void saveTables() {
+        try (FileWriter tw = new FileWriter(tablesFile)) {
             gson.toJson(tables, tw);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void saveIndexes() {
+        try (FileWriter iw = new FileWriter(indexesFile)) {
             gson.toJson(indexes, iw);
         } catch (IOException e) {
             e.printStackTrace();
