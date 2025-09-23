@@ -55,8 +55,13 @@ public class CatalogManager {
         } catch (IOException e) {
             e.printStackTrace();
         }
+
+        // Ensure not null
+        if (tables == null) tables = new HashMap<>();
+        if (indexes == null) indexes = new HashMap<>();
     }
 
+    // Could be used in the future
     private void saveCatalog() {
         saveTables();
         saveIndexes();

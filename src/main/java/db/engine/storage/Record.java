@@ -20,7 +20,7 @@ public class Record {
 
     // Serialize record to byte[]
     public byte[] toBytes(List<ColumnSchema> columns) {
-        // Estimate buffer size (INT=4, BOOLEAN=1, VARCHAR uses length + 4)
+        // Estimate buffer size (INT=4, BOOLEAN=1, VARCHAR = 4 (len) + bytes)
         int bufferSize = 0;
         for (int i = 0; i < columns.size(); i++) {
             ColumnSchema col = columns.get(i);
@@ -53,8 +53,9 @@ public class Record {
                     buffer.put((byte) ((Boolean) val ? 1 : 0));
                     break;
                 case "VARCHAR":
-                    byte[] strByte = ((String) val).getBytes(StandardCharsets.UTF_8);
-                    buffer.putInt(strByte.length);
+                    byte[] strBytes = ((String) val).getBytes(StandardCharsets.UTF_8);
+                    buffer.putInt(strBytes.length);
+                    buffer.put(strBytes);
                     break;
             }
         }
