@@ -6,6 +6,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.nio.ByteBuffer;
 
 import db.engine.catalog.CatalogManager;
 import db.engine.catalog.ColumnSchema;
@@ -80,18 +81,10 @@ public class StorageManager {
     }
 
     private byte[] intToBytes(int val) {
-        return new byte[] {
-            (byte)(val >>> 24),
-            (byte)(val >>> 16),
-            (byte)(val >>> 8),
-            (byte) val
-        };
+        return ByteBuffer.allocate(4).putInt(val).array();
     }
 
     private int bytesToInt(byte[] bytes) {
-        return ((bytes[0] & 0xFF) << 24) |
-               ((bytes[1] & 0xFF) << 16) |
-               ((bytes[2] & 0xFF) << 8)  |
-               (bytes[3] & 0xFF);
+        return ByteBuffer.wrap(bytes).getInt();
     }
 }
