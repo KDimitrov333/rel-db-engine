@@ -24,18 +24,28 @@ public class CatalogManager {
         loadCatalog();
     }
 
-    public void registerTable(TableSchema tSchema) {
-        tables.put(tSchema.name(), tSchema);
+    public boolean registerTable(TableSchema tSchema) {
+        String name = tSchema.name();
+        if (tables.containsKey(name)) {
+            return false; // do not overwrite existing
+        }
+        tables.put(name, tSchema);
         saveTables();
+        return true;
     }
 
     public TableSchema getTableSchema(String name) {
         return tables.get(name);
     }
 
-    public void registerIndex(IndexSchema iSchema) {
-        indexes.put(iSchema.name(), iSchema);
+    public boolean registerIndex(IndexSchema iSchema) {
+        String name = iSchema.name();
+        if (indexes.containsKey(name)) {
+            return false; // do not overwrite existing
+        }
+        indexes.put(name, iSchema);
         saveIndexes();
+        return true;
     }
 
     public IndexSchema getIndexSchema(String name) {
