@@ -4,18 +4,27 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class BPlusTree {
-    private final int order;              // max children per node
+    private final int order;              // max children per node (i.e., max pointers per internal node)
+    private final int maxKeys;            // order - 1 (max keys per node)
+    private final int splitMidIndex;      // cached median index
     private Node root;
 
     public BPlusTree(int order) {
         this.order = order;
+        this.maxKeys = order - 1;
+        this.splitMidIndex = (order - 1) / 2; // used for splits
         this.root = new Node(true); // start as empty leaf
+    }
+
+    // Expose order for potential diagnostics / external validation
+    public int getOrder() {
+        return order;
     }
 
     // Insert key into recordId
     public void insert(int key, int recordId) {
         Node r = root;
-        if (r.keys.size() == order - 1) {
+        if (r.keys.size() == maxKeys) {
             // root is full, split
             Node newRoot = new Node(false);
             newRoot.children.add(r);
@@ -51,7 +60,7 @@ public class BPlusTree {
             int pos = firstGreaterOrEqualPosition(node.keys, key);
 
             Node child = node.children.get(pos);
-            if (child.keys.size() == order - 1) {
+            if (child.keys.size() == maxKeys) {
                 splitChild(node, pos, child);
                 if (key >= node.keys.get(pos)) {
                     pos++;
@@ -85,7 +94,7 @@ public class BPlusTree {
 
     // Split a full leaf node; promote first key of the new right sibling
     private void splitLeafChild(Node parent, int index, Node leaf) {
-        int mid = (order - 1) / 2; // leaf retains [0..mid]
+        int mid = splitMidIndex; // leaf retains [0..mid]
         Node sibling = new Node(true);
 
         // Copy keys/values to sibling (right side > mid)
@@ -111,7 +120,7 @@ public class BPlusTree {
 
     // Split a full internal node; promote median key; left keeps < median, right keeps > median
     private void splitInternalChild(Node parent, int index, Node internal) {
-        int mid = (order - 1) / 2; // median key index
+        int mid = splitMidIndex; // median key index
         int medianKey = internal.keys.get(mid); // capture before shrinking
         Node sibling = new Node(false);
 
@@ -133,7 +142,7 @@ public class BPlusTree {
         parent.children.add(index + 1, sibling);
     }
 
-    // returns first position where existingKey > key (for leaf insert ordering)
+    // lower bound: first position with key >= target
     private int firstGreaterPosition(List<Integer> keys, int key) {
         // Binary search lower bound: first index where existingKey >= key
         int lo = 0, hi = keys.size();
@@ -148,7 +157,7 @@ public class BPlusTree {
         return lo;
     }
 
-    // returns first position where existingKey >= key (for descent)
+    // upper bound: first position with key > target
     private int firstGreaterOrEqualPosition(List<Integer> keys, int key) {
         // Binary search upper bound: first index where existingKey > key
         int lo = 0, hi = keys.size();
@@ -165,11 +174,11 @@ public class BPlusTree {
 
     // Internal node structure
     private static final class Node {
-        boolean isLeaf;
-        List<Integer> keys;
-        List<Node> children;        // internal nodes only
-        List<List<Integer>> values; // leaf nodes only
-        Node next;                  // link leaf nodes
+        final boolean isLeaf;
+        final List<Integer> keys;
+        final List<Node> children;        // internal nodes only (null for leaves)
+        final List<List<Integer>> values; // leaf nodes only (null for internals)
+        Node next;                        // link leaf nodes (mutable linkage)
 
         Node(boolean isLeaf) {
             this.isLeaf = isLeaf;
