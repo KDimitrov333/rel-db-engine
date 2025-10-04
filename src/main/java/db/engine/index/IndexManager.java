@@ -27,16 +27,16 @@ public class IndexManager {
         TableSchema tSchema = catalog.getTableSchema(tableName);
         if (tSchema == null) throw new IllegalArgumentException("Table not found: " + tableName);
 
-        List<ColumnSchema> cols = tSchema.getColumns();
+        List<ColumnSchema> cols = tSchema.columns();
         int colIndex = -1;
         for (int i = 0; i < cols.size(); i++) {
-            if (cols.get(i).getName().equals(columnName)) {
+            if (cols.get(i).name().equals(columnName)) {
                 colIndex = i;
                 break;
             }
         }
         if (colIndex == -1) throw new IllegalArgumentException("Column not found: " + columnName);
-        if (!cols.get(colIndex).getType().equals("INT")) {
+        if (!cols.get(colIndex).type().equals("INT")) {
             throw new IllegalArgumentException("Indexing only supported on INT columns");
         }
 
@@ -70,7 +70,7 @@ public class IndexManager {
         if (tree == null) throw new IllegalArgumentException("Index not found: " + indexName);
 
         IndexSchema iSchema = catalog.getIndexSchema(indexName);
-        List<Record> records = storage.scanTable(iSchema.getTable());
+        List<Record> records = storage.scanTable(iSchema.table());
 
         List<Integer> rids = tree.search(key);
         List<Record> results = new ArrayList<>();

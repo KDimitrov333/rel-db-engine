@@ -25,7 +25,7 @@ public class CatalogManager {
     }
 
     public void registerTable(TableSchema tSchema) {
-        tables.put(tSchema.getName(), tSchema);
+        tables.put(tSchema.name(), tSchema);
         saveTables();
     }
 
@@ -34,7 +34,7 @@ public class CatalogManager {
     }
 
     public void registerIndex(IndexSchema iSchema) {
-        indexes.put(iSchema.getName(), iSchema);
+        indexes.put(iSchema.name(), iSchema);
         saveIndexes();
     }
 

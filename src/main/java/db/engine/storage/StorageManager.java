@@ -25,10 +25,10 @@ public class StorageManager {
             throw new IllegalArgumentException("Table not found: " + tableName);
         }
 
-        List<ColumnSchema> columns = tSchema.getColumns();
+        List<ColumnSchema> columns = tSchema.columns();
         byte[] data = record.toBytes(columns);
 
-        try (FileOutputStream fos = new FileOutputStream(tSchema.getFilePath(), true)) {
+    try (FileOutputStream fos = new FileOutputStream(tSchema.filePath(), true)) {
             // write record length
             fos.write(intToBytes(data.length));
             // write record bytes
@@ -42,7 +42,7 @@ public class StorageManager {
         catalog.registerTable(schema);
 
         try {
-            File f = new File(schema.getFilePath());
+            File f = new File(schema.filePath());
             f.getParentFile().mkdirs();
             f.createNewFile();  // actual storage
             System.out.println("Created table file: " + f.getPath());
@@ -58,9 +58,9 @@ public class StorageManager {
         }
 
         List<Record> results = new ArrayList<>();
-        List<ColumnSchema> columns = tSchema.getColumns();
+        List<ColumnSchema> columns = tSchema.columns();
 
-        try (FileInputStream fis = new FileInputStream(tSchema.getFilePath())) {
+        try (FileInputStream fis = new FileInputStream(tSchema.filePath())) {
             byte[] bufLen = new byte[4];
 
             while (fis.read(bufLen) == 4) {

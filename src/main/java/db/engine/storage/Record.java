@@ -25,7 +25,7 @@ public class Record {
         for (int i = 0; i < columns.size(); i++) {
             ColumnSchema col = columns.get(i);
             Object val = values.get(i);
-            switch (col.getType()) {
+            switch (col.type()) {
                 case "INT":
                     bufferSize += 4;
                     break;
@@ -45,7 +45,7 @@ public class Record {
             ColumnSchema col = columns.get(i);
             Object val = values.get(i);
 
-            switch (col.getType()) {
+            switch (col.type()) {
                 case "INT":
                     buffer.putInt((int) val);
                     break;
@@ -69,7 +69,7 @@ public class Record {
         List<Object> values = new ArrayList<>();
 
         for (ColumnSchema col : columns) {
-            switch (col.getType()) {
+            switch (col.type()) {
                 case "INT":
                     values.add(buffer.getInt());
                     break;
