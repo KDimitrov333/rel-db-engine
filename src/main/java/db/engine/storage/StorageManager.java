@@ -30,9 +30,9 @@ public class StorageManager {
         validateRecord(columns, record);
         byte[] data = record.toBytes(columns);
 
-    try (FileOutputStream fos = new FileOutputStream(tSchema.filePath(), true)) {
-            // write record length
-            fos.write(intToBytes(data.length));
+        try (FileOutputStream fos = new FileOutputStream(tSchema.filePath(), true)) {
+            // write record length (4-byte big-endian)
+            fos.write(ByteBuffer.allocate(4).putInt(data.length).array());
             // write record bytes
             fos.write(data);
         } catch (IOException e) {
@@ -68,7 +68,7 @@ public class StorageManager {
 
             while (fis.read(bufLen) == 4) {
                 offset += 4;
-                int recordLen = bytesToInt(bufLen);
+                int recordLen = ByteBuffer.wrap(bufLen).getInt();
                 if (recordLen <= 0) {
                     System.err.println("[StorageManager] Invalid record length " + recordLen + " at offset " + (offset - 4));
                     break;
@@ -89,14 +89,6 @@ public class StorageManager {
         }
 
         return results;
-    }
-
-    private byte[] intToBytes(int val) {
-        return ByteBuffer.allocate(4).putInt(val).array();
-    }
-
-    private int bytesToInt(byte[] bytes) {
-        return ByteBuffer.wrap(bytes).getInt();
     }
 
     // Validation: arity, type consistency, VARCHAR length constraint
