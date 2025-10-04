@@ -10,13 +10,20 @@ import java.nio.ByteBuffer;
 
 import db.engine.catalog.CatalogManager;
 import db.engine.catalog.ColumnSchema;
+import db.engine.index.IndexManager;
 import db.engine.catalog.TableSchema;
 
 public class StorageManager {
     private CatalogManager catalog;
+    private IndexManager indexManager; // optional; may be set after construction
 
     public StorageManager(CatalogManager catalog) {
         this.catalog = catalog;
+    }
+
+    // Allow late binding to avoid circular construction concerns
+    public void attachIndexManager(IndexManager indexManager) {
+        this.indexManager = indexManager;
     }
 
     // Inserts a record into the table file
@@ -35,6 +42,10 @@ public class StorageManager {
             fos.write(ByteBuffer.allocate(4).putInt(data.length).array());
             // write record bytes
             fos.write(data);
+            // Only notify indexes if write succeeded
+            if (indexManager != null) {
+                indexManager.onTableInsert(tableName, record);
+            }
         } catch (IOException e) {
             e.printStackTrace();
         }
