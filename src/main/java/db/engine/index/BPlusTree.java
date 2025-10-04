@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class BPlusTree {
-    private int order;              // max children per node
+    private final int order;              // max children per node
     private Node root;
 
     public BPlusTree(int order) {
@@ -50,16 +50,7 @@ public class BPlusTree {
     // Insert into non-full node
     private void insertNonFull(Node node, int key, int recordId) {
         if (node.isLeaf) {
-            int pos = firstGreaterPosition(node.keys, key);
-
-            if (pos < node.keys.size() && node.keys.get(pos) == key) {
-                node.values.get(pos).add(recordId);
-            } else {
-                node.keys.add(pos, key);
-                List<Integer> list = new ArrayList<>();
-                list.add(recordId);
-                node.values.add(pos, list);
-            }
+            leafInsert(node, key, recordId);
         } else {
             int pos = firstGreaterOrEqualPosition(node.keys, key);
 
@@ -71,6 +62,19 @@ public class BPlusTree {
                 }
             }
             insertNonFull(node.children.get(pos), key, recordId);
+        }
+    }
+
+    // Insert into a leaf node at correct sorted position (or append to existing key's RID list)
+    private void leafInsert(Node leaf, int key, int recordId) {
+        int pos = firstGreaterPosition(leaf.keys, key);
+        if (pos < leaf.keys.size() && leaf.keys.get(pos) == key) {
+            leaf.values.get(pos).add(recordId);
+        } else {
+            leaf.keys.add(pos, key);
+            List<Integer> list = new ArrayList<>();
+            list.add(recordId);
+            leaf.values.add(pos, list);
         }
     }
 
@@ -126,5 +130,26 @@ public class BPlusTree {
         int i = 0;
         while (i < keys.size() && key >= keys.get(i)) i++;
         return i;
+    }
+
+    // Internal node structure
+    private static final class Node {
+        boolean isLeaf;
+        List<Integer> keys;
+        List<Node> children;        // internal nodes only
+        List<List<Integer>> values; // leaf nodes only
+        Node next;                  // link leaf nodes
+
+        Node(boolean isLeaf) {
+            this.isLeaf = isLeaf;
+            this.keys = new ArrayList<>();
+            if (isLeaf) {
+                this.values = new ArrayList<>();
+                this.children = null;
+            } else {
+                this.children = new ArrayList<>();
+                this.values = null;
+            }
+        }
     }
 }
