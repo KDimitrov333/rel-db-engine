@@ -50,8 +50,7 @@ public class BPlusTree {
     // Insert into non-full node
     private void insertNonFull(Node node, int key, int recordId) {
         if (node.isLeaf) {
-            int pos = 0;
-            while (pos < node.keys.size() && key > node.keys.get(pos)) pos++;
+            int pos = firstGreaterPosition(node.keys, key);
 
             if (pos < node.keys.size() && node.keys.get(pos) == key) {
                 node.values.get(pos).add(recordId);
@@ -62,8 +61,7 @@ public class BPlusTree {
                 node.values.add(pos, list);
             }
         } else {
-            int pos = 0;
-            while (pos < node.keys.size() && key >= node.keys.get(pos)) pos++;
+            int pos = firstGreaterOrEqualPosition(node.keys, key);
 
             Node child = node.children.get(pos);
             if (child.keys.size() == order - 1) {
@@ -114,5 +112,19 @@ public class BPlusTree {
             parent.keys.add(index, child.keys.get(mid));
             parent.children.add(index + 1, sibling);
         }
+    }
+
+    // returns first position where existingKey > key (for leaf insert ordering)
+    private int firstGreaterPosition(List<Integer> keys, int key) {
+        int i = 0;
+        while (i < keys.size() && key > keys.get(i)) i++;
+        return i;
+    }
+
+    // returns first position where existingKey >= key (for descent)
+    private int firstGreaterOrEqualPosition(List<Integer> keys, int key) {
+        int i = 0;
+        while (i < keys.size() && key >= keys.get(i)) i++;
+        return i;
     }
 }
