@@ -32,18 +32,14 @@ public class BPlusTree {
 
     private List<Integer> searchRecursive(Node node, int key) {
         if (node.isLeaf) {
-            for (int i = 0; i < node.keys.size(); i++) {
-                if (node.keys.get(i) == key) {
-                    return node.values.get(i);
-                }
+            int pos = firstGreaterPosition(node.keys, key); // lower bound (>= key)
+            if (pos < node.keys.size() && node.keys.get(pos) == key) {
+                return node.values.get(pos);
             }
             return new ArrayList<>();
         } else {
-            int i = 0;
-            while (i < node.keys.size() && key >= node.keys.get(i)) {
-                i++;
-            }
-            return searchRecursive(node.children.get(i), key);
+            int childIndex = firstGreaterOrEqualPosition(node.keys, key); // upper bound (> key)
+            return searchRecursive(node.children.get(childIndex), key);
         }
     }
 
@@ -120,16 +116,32 @@ public class BPlusTree {
 
     // returns first position where existingKey > key (for leaf insert ordering)
     private int firstGreaterPosition(List<Integer> keys, int key) {
-        int i = 0;
-        while (i < keys.size() && key > keys.get(i)) i++;
-        return i;
+        // Binary search lower bound: first index where existingKey >= key
+        int lo = 0, hi = keys.size();
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            if (keys.get(mid) < key) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return lo;
     }
 
     // returns first position where existingKey >= key (for descent)
     private int firstGreaterOrEqualPosition(List<Integer> keys, int key) {
-        int i = 0;
-        while (i < keys.size() && key >= keys.get(i)) i++;
-        return i;
+        // Binary search upper bound: first index where existingKey > key
+        int lo = 0, hi = keys.size();
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            if (keys.get(mid) <= key) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return lo;
     }
 
     // Internal node structure
