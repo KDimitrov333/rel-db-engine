@@ -4,3 +4,7 @@ target/
 *.jar
 *.war
 *.ear
+
+catalog/*
+data/*
+indexes/*
