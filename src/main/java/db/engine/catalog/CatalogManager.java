@@ -4,16 +4,16 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
-
 import java.util.HashMap;
 import java.util.Map;
+import java.lang.reflect.Type;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 
 public class CatalogManager {
-    private Map<String, TableSchema> tables = new HashMap<>();
-    private Map<String, IndexSchema> indexes = new HashMap<>();
+    private final Map<String, TableSchema> tables = new HashMap<>();
+    private final Map<String, IndexSchema> indexes = new HashMap<>();
 
     private final File tablesFile = new File("catalog/tables.json");
     private final File indexesFile = new File("catalog/indexes.json");
@@ -43,22 +43,8 @@ public class CatalogManager {
     }
 
     private void loadCatalog() {
-        try {
-            if (tablesFile.exists()) {
-                tables = gson.fromJson(new FileReader(tablesFile),
-                        new TypeToken<Map<String, TableSchema>>(){}.getType());
-            }
-            if (indexesFile.exists()) {
-                indexes = gson.fromJson(new FileReader(indexesFile),
-                        new TypeToken<Map<String, IndexSchema>>(){}.getType());
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-        // Ensure not null
-        if (tables == null) tables = new HashMap<>();
-        if (indexes == null) indexes = new HashMap<>();
+        loadInto(tablesFile, new TypeToken<Map<String, TableSchema>>(){}.getType(), tables);
+        loadInto(indexesFile, new TypeToken<Map<String, IndexSchema>>(){}.getType(), indexes);
     }
 
     // Could be used in the future
@@ -67,19 +53,33 @@ public class CatalogManager {
         saveIndexes();
     }
 
-    private void saveTables() {
-        try (FileWriter tw = new FileWriter(tablesFile)) {
-            gson.toJson(tables, tw);
-        } catch (IOException e) {
-            e.printStackTrace();
+    private void saveTables() { writeMap(tables, tablesFile); }
+
+    private void saveIndexes() { writeMap(indexes, indexesFile); }
+
+    private <T> void loadInto(File file, Type type, Map<String, T> target) {
+        if (!file.exists()) return;
+        try (FileReader reader = new FileReader(file)) {
+            Map<String, T> loaded = gson.fromJson(reader, type);
+            if (loaded != null) {
+                target.clear();
+                target.putAll(loaded);
+            }
+        } catch (IOException | com.google.gson.JsonSyntaxException e) {
+            logError("Failed loading catalog file: " + file.getPath(), e);
         }
     }
 
-    private void saveIndexes() {
-        try (FileWriter iw = new FileWriter(indexesFile)) {
-            gson.toJson(indexes, iw);
+    private <T> void writeMap(Map<String, T> map, File file) {
+        try (FileWriter writer = new FileWriter(file)) {
+            gson.toJson(map, writer);
         } catch (IOException e) {
-            e.printStackTrace();
+            logError("Failed saving catalog file: " + file.getPath(), e);
         }
+    }
+
+    private void logError(String message, Exception e) {
+        System.err.println("[CatalogManager] " + message);
+        e.printStackTrace(System.err);
     }
 }
