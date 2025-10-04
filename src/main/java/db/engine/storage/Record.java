@@ -10,6 +10,10 @@ import db.engine.catalog.ColumnSchema;
 public class Record {
     private List<Object> values;
 
+    private static final int INT_BYTES = 4;
+    private static final int BOOLEAN_BYTES = 1; // stored as single byte (1 or 0)
+    private static final int VARCHAR_PREFIX_BYTES = 4; // length prefix for VARCHAR
+
     public Record(List<Object> values) {
         this.values = values;
     }
@@ -20,25 +24,7 @@ public class Record {
 
     // Serialize record to byte[]
     public byte[] toBytes(List<ColumnSchema> columns) {
-        // Estimate buffer size (INT=4, BOOLEAN=1, VARCHAR = 4 (len) + bytes)
-        int bufferSize = 0;
-        for (int i = 0; i < columns.size(); i++) {
-            ColumnSchema col = columns.get(i);
-            Object val = values.get(i);
-            switch (col.type()) {
-                case "INT":
-                    bufferSize += 4;
-                    break;
-                case "BOOLEAN":
-                    bufferSize += 1;
-                    break;
-                case "VARCHAR":
-                    String s = (String) val;
-                    bufferSize += 4 + s.getBytes(StandardCharsets.UTF_8).length;
-                    break;
-            }
-        }
-
+        int bufferSize = computeSerializedSize(columns);
         ByteBuffer buffer = ByteBuffer.allocate(bufferSize);
 
         for (int i = 0; i < columns.size(); i++) {
@@ -61,6 +47,23 @@ public class Record {
         }
 
         return buffer.array();
+    }
+
+    private int computeSerializedSize(List<ColumnSchema> columns) {
+        int size = 0;
+        for (int i = 0; i < columns.size(); i++) {
+            ColumnSchema col = columns.get(i);
+            Object val = values.get(i);
+            switch (col.type()) {
+                case "INT" -> size += INT_BYTES;
+                case "BOOLEAN" -> size += BOOLEAN_BYTES;
+                case "VARCHAR" -> {
+                    String s = (String) val;
+                    size += VARCHAR_PREFIX_BYTES + s.getBytes(StandardCharsets.UTF_8).length;
+                }
+            }
+        }
+        return size;
     }
 
     // Deserialize record from byte[]
