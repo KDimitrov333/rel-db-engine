@@ -28,13 +28,7 @@ public class IndexManager {
         if (tSchema == null) throw new IllegalArgumentException("Table not found: " + tableName);
 
         List<ColumnSchema> cols = tSchema.columns();
-        int colIndex = -1;
-        for (int i = 0; i < cols.size(); i++) {
-            if (cols.get(i).name().equals(columnName)) {
-                colIndex = i;
-                break;
-            }
-        }
+        int colIndex = findColumnIndex(cols, columnName);
         if (colIndex == -1) throw new IllegalArgumentException("Column not found: " + columnName);
         if (!cols.get(colIndex).type().equals("INT")) {
             throw new IllegalArgumentException("Indexing only supported on INT columns");
@@ -78,5 +72,13 @@ public class IndexManager {
             results.add(records.get(rid));
         }
         return results;
+    }
+
+    // Helper: find column index by name, returns -1 if not found.
+    private int findColumnIndex(List<ColumnSchema> cols, String name) {
+        for (int i = 0; i < cols.size(); i++) {
+            if (cols.get(i).name().equals(name)) return i;
+        }
+        return -1;
     }
 }
