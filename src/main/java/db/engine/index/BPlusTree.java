@@ -76,42 +76,61 @@ public class BPlusTree {
 
     // Split child
     private void splitChild(Node parent, int index, Node child) {
-        int mid = (order - 1) / 2;
-        Node sibling = new Node(child.isLeaf);
-
-        // move half the keys
-        for (int i = mid + 1; i < child.keys.size(); i++) {
-            sibling.keys.add(child.keys.get(i));
-        }
-
         if (child.isLeaf) {
-            for (int i = mid + 1; i < child.values.size(); i++) {
-                sibling.values.add(child.values.get(i));
-            }
-            // maintain leaf links
-            sibling.next = child.next;
-            child.next = sibling;
-
-            // shrink child
-            while (child.keys.size() > mid + 1) child.keys.remove(child.keys.size() - 1);
-            while (child.values.size() > mid + 1) child.values.remove(child.values.size() - 1);
-
-            // insert new key in parent
-            parent.keys.add(index, sibling.keys.get(0));
-            parent.children.add(index + 1, sibling);
+            splitLeafChild(parent, index, child);
         } else {
-            for (int i = mid + 1; i < child.children.size(); i++) {
-                sibling.children.add(child.children.get(i));
-            }
-
-            // shrink child
-            while (child.keys.size() > mid) child.keys.remove(child.keys.size() - 1);
-            while (child.children.size() > mid + 1) child.children.remove(child.children.size() - 1);
-
-            // insert new key in parent
-            parent.keys.add(index, child.keys.get(mid));
-            parent.children.add(index + 1, sibling);
+            splitInternalChild(parent, index, child);
         }
+    }
+
+    // Split a full leaf node; promote first key of the new right sibling
+    private void splitLeafChild(Node parent, int index, Node leaf) {
+        int mid = (order - 1) / 2; // leaf retains [0..mid]
+        Node sibling = new Node(true);
+
+        // Copy keys/values to sibling (right side > mid)
+        for (int i = mid + 1; i < leaf.keys.size(); i++) {
+            sibling.keys.add(leaf.keys.get(i));
+        }
+        for (int i = mid + 1; i < leaf.values.size(); i++) {
+            sibling.values.add(leaf.values.get(i));
+        }
+
+        // Maintain leaf chain
+        sibling.next = leaf.next;
+        leaf.next = sibling;
+
+        // Shrink original leaf to keep keys/values up to mid inclusive
+        while (leaf.keys.size() > mid + 1) leaf.keys.remove(leaf.keys.size() - 1);
+        while (leaf.values.size() > mid + 1) leaf.values.remove(leaf.values.size() - 1);
+
+        // Promote first key of sibling
+        parent.keys.add(index, sibling.keys.get(0));
+        parent.children.add(index + 1, sibling);
+    }
+
+    // Split a full internal node; promote median key; left keeps < median, right keeps > median
+    private void splitInternalChild(Node parent, int index, Node internal) {
+        int mid = (order - 1) / 2; // median key index
+        int medianKey = internal.keys.get(mid); // capture before shrinking
+        Node sibling = new Node(false);
+
+        // Copy keys strictly greater than median to sibling
+        for (int i = mid + 1; i < internal.keys.size(); i++) {
+            sibling.keys.add(internal.keys.get(i));
+        }
+        // Copy corresponding child pointers to sibling (those to the right of median)
+        for (int i = mid + 1; i < internal.children.size(); i++) {
+            sibling.children.add(internal.children.get(i));
+        }
+
+        // Shrink original internal: keep keys [0..mid-1] and children [0..mid]
+        while (internal.keys.size() > mid) internal.keys.remove(internal.keys.size() - 1);
+        while (internal.children.size() > mid + 1) internal.children.remove(internal.children.size() - 1);
+
+        // Insert median into parent between the two children
+        parent.keys.add(index, medianKey);
+        parent.children.add(index + 1, sibling);
     }
 
     // returns first position where existingKey > key (for leaf insert ordering)
