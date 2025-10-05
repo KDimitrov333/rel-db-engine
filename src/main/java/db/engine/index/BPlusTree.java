@@ -1,18 +1,22 @@
 package db.engine.index;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class BPlusTree {
-    private final int order;              // max children per node (i.e., max pointers per internal node)
-    private final int maxKeys;            // order - 1 (max keys per node)
-    private final int splitMidIndex;      // cached median index
+    private final int order;              // max children per internal node
+    private final int maxKeys;            // order - 1
+    private final int medianKeyIndex;     // cached median index for splits
     private Node root;
 
     public BPlusTree(int order) {
+        if (order < 3) {
+            throw new IllegalArgumentException("B+ tree order must be >= 3 (got " + order + ")");
+        }
         this.order = order;
         this.maxKeys = order - 1;
-        this.splitMidIndex = (order - 1) / 2; // used for splits
+        this.medianKeyIndex = (order - 1) / 2; // used for splits
         this.root = new Node(true); // start as empty leaf
     }
 
@@ -21,7 +25,7 @@ public class BPlusTree {
         return order;
     }
 
-    // Insert key into recordId
+    // Insert (key, recordId)
     public void insert(int key, int recordId) {
         Node r = root;
         if (r.keys.size() == maxKeys) {
@@ -35,9 +39,7 @@ public class BPlusTree {
     }
 
     // Search for key
-    public List<Integer> search(int key) {
-        return searchRecursive(root, key);
-    }
+    public List<Integer> search(int key) { return searchRecursive(root, key); }
 
     /**
      * Range search: returns all record ids whose key is in [lowInclusive, highInclusive].
@@ -49,16 +51,15 @@ public class BPlusTree {
         Node leaf = findLeaf(lowInclusive);
         if (leaf == null) return result;
 
-        int pos = firstGreaterPosition(leaf.keys, lowInclusive); // first key >= low
+        int pos = lowerBound(leaf.keys, lowInclusive); // first key >= low
         while (leaf != null) {
             for (int i = pos; i < leaf.keys.size(); i++) {
                 int k = leaf.keys.get(i);
-                if (k > highInclusive) return result; // we've passed the range
-                // k within range
+                if (k > highInclusive) return result; // past range
                 result.addAll(leaf.values.get(i));
             }
             leaf = leaf.next;
-            pos = 0; // start at beginning of next leaf
+            pos = 0; // restart at new leaf head
         }
         return result;
     }
@@ -67,7 +68,7 @@ public class BPlusTree {
     private Node findLeaf(int key) {
         Node current = root;
         while (!current.isLeaf) {
-            int childIndex = firstGreaterOrEqualPosition(current.keys, key); // upper bound (> key)
+            int childIndex = upperBound(current.keys, key); // first separator > key
             current = current.children.get(childIndex);
         }
         return current;
@@ -75,15 +76,14 @@ public class BPlusTree {
 
     private List<Integer> searchRecursive(Node node, int key) {
         if (node.isLeaf) {
-            int pos = firstGreaterPosition(node.keys, key); // lower bound (>= key)
+            int pos = lowerBound(node.keys, key); // first >= key
             if (pos < node.keys.size() && node.keys.get(pos) == key) {
                 return node.values.get(pos);
             }
-            return new ArrayList<>();
-        } else {
-            int childIndex = firstGreaterOrEqualPosition(node.keys, key); // upper bound (> key)
-            return searchRecursive(node.children.get(childIndex), key);
+            return Collections.emptyList();
         }
+        int childIndex = upperBound(node.keys, key); // first > key
+        return searchRecursive(node.children.get(childIndex), key);
     }
 
     // Insert into non-full node
@@ -91,7 +91,7 @@ public class BPlusTree {
         if (node.isLeaf) {
             leafInsert(node, key, recordId);
         } else {
-            int pos = firstGreaterOrEqualPosition(node.keys, key);
+            int pos = upperBound(node.keys, key);
 
             Node child = node.children.get(pos);
             if (child.keys.size() == maxKeys) {
@@ -106,7 +106,7 @@ public class BPlusTree {
 
     // Insert into a leaf node at correct sorted position (or append to existing key's RID list)
     private void leafInsert(Node leaf, int key, int recordId) {
-        int pos = firstGreaterPosition(leaf.keys, key);
+        int pos = lowerBound(leaf.keys, key);
         if (pos < leaf.keys.size() && leaf.keys.get(pos) == key) {
             leaf.values.get(pos).add(recordId);
         } else {
@@ -128,80 +128,64 @@ public class BPlusTree {
 
     // Split a full leaf node; promote first key of the new right sibling
     private void splitLeafChild(Node parent, int index, Node leaf) {
-        int mid = splitMidIndex; // leaf retains [0..mid]
+        int mid = medianKeyIndex;
         Node sibling = new Node(true);
 
-        // Copy keys/values to sibling (right side > mid)
-        for (int i = mid + 1; i < leaf.keys.size(); i++) {
-            sibling.keys.add(leaf.keys.get(i));
-        }
-        for (int i = mid + 1; i < leaf.values.size(); i++) {
-            sibling.values.add(leaf.values.get(i));
-        }
+        // Copy right side to sibling
+        for (int i = mid + 1; i < leaf.keys.size(); i++) sibling.keys.add(leaf.keys.get(i));
+        for (int i = mid + 1; i < leaf.values.size(); i++) sibling.values.add(leaf.values.get(i));
 
-        // Maintain leaf chain
+        // Link leaf chain
         sibling.next = leaf.next;
         leaf.next = sibling;
 
-        // Shrink original leaf to keep keys/values up to mid inclusive
+        // Trim original leaf (retain inclusive mid)
         while (leaf.keys.size() > mid + 1) leaf.keys.remove(leaf.keys.size() - 1);
         while (leaf.values.size() > mid + 1) leaf.values.remove(leaf.values.size() - 1);
 
-        // Promote first key of sibling
+        // Promote first key of sibling (copy-up style)
         parent.keys.add(index, sibling.keys.get(0));
         parent.children.add(index + 1, sibling);
     }
 
     // Split a full internal node; promote median key; left keeps < median, right keeps > median
     private void splitInternalChild(Node parent, int index, Node internal) {
-        int mid = splitMidIndex; // median key index
-        int medianKey = internal.keys.get(mid); // capture before shrinking
+        int mid = medianKeyIndex; // median separator
+        int medianKey = internal.keys.get(mid);
         Node sibling = new Node(false);
 
-        // Copy keys strictly greater than median to sibling
-        for (int i = mid + 1; i < internal.keys.size(); i++) {
-            sibling.keys.add(internal.keys.get(i));
-        }
-        // Copy corresponding child pointers to sibling (those to the right of median)
-        for (int i = mid + 1; i < internal.children.size(); i++) {
-            sibling.children.add(internal.children.get(i));
-        }
+        // Right sibling copies keys > median
+        for (int i = mid + 1; i < internal.keys.size(); i++) sibling.keys.add(internal.keys.get(i));
+        // Children to right of median
+        for (int i = mid + 1; i < internal.children.size(); i++) sibling.children.add(internal.children.get(i));
 
-        // Shrink original internal: keep keys [0..mid-1] and children [0..mid]
+        // Trim left node to keys < median and corresponding children
         while (internal.keys.size() > mid) internal.keys.remove(internal.keys.size() - 1);
         while (internal.children.size() > mid + 1) internal.children.remove(internal.children.size() - 1);
 
-        // Insert median into parent between the two children
+        // Parent takes median and pointer to new right sibling
         parent.keys.add(index, medianKey);
         parent.children.add(index + 1, sibling);
     }
 
-    // lower bound: first position with key >= target
-    private int firstGreaterPosition(List<Integer> keys, int key) {
-        // Binary search lower bound: first index where existingKey >= key
+    // lowerBound: first index with keys[i] >= key (or keys.size() if none).
+    // Used for leaf insertion and range scan start.
+    private int lowerBound(List<Integer> keys, int key) {
         int lo = 0, hi = keys.size();
         while (lo < hi) {
-            int mid = (lo + hi) >>> 1;
-            if (keys.get(mid) < key) {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
+            int mid = (lo + hi) / 2;
+            if (keys.get(mid) < key) lo = mid + 1; else hi = mid;
         }
         return lo;
     }
 
-    // upper bound: first position with key > target
-    private int firstGreaterOrEqualPosition(List<Integer> keys, int key) {
-        // Binary search upper bound: first index where existingKey > key
+    // upperBound: first index with keys[i] > key (or keys.size() if none).
+    // Used for internal routing: childIndex = upperBound(separators, key) where equal keys go right.
+    private int upperBound(List<Integer> keys, int key) {
         int lo = 0, hi = keys.size();
         while (lo < hi) {
-            int mid = (lo + hi) >>> 1;
-            if (keys.get(mid) <= key) {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
+            int mid = (lo + hi) / 2;
+            if (keys.get(mid) <= key) lo = mid + 1; else hi = mid;
         }
         return lo;
     }
