@@ -39,6 +39,40 @@ public class BPlusTree {
         return searchRecursive(root, key);
     }
 
+    /**
+     * Range search: returns all record ids whose key is in [lowInclusive, highInclusive].
+     * Keys returned preserve ascending key order; duplicate key record ids preserve insertion order.
+     */
+    public List<Integer> rangeSearch(int lowInclusive, int highInclusive) {
+        List<Integer> result = new ArrayList<>();
+        if (lowInclusive > highInclusive) return result;
+        Node leaf = findLeaf(lowInclusive);
+        if (leaf == null) return result;
+
+        int pos = firstGreaterPosition(leaf.keys, lowInclusive); // first key >= low
+        while (leaf != null) {
+            for (int i = pos; i < leaf.keys.size(); i++) {
+                int k = leaf.keys.get(i);
+                if (k > highInclusive) return result; // we've passed the range
+                // k within range
+                result.addAll(leaf.values.get(i));
+            }
+            leaf = leaf.next;
+            pos = 0; // start at beginning of next leaf
+        }
+        return result;
+    }
+
+    // Descend to the leaf that would contain the given key (first >= key or rightmost)
+    private Node findLeaf(int key) {
+        Node current = root;
+        while (!current.isLeaf) {
+            int childIndex = firstGreaterOrEqualPosition(current.keys, key); // upper bound (> key)
+            current = current.children.get(childIndex);
+        }
+        return current;
+    }
+
     private List<Integer> searchRecursive(Node node, int key) {
         if (node.isLeaf) {
             int pos = firstGreaterPosition(node.keys, key); // lower bound (>= key)

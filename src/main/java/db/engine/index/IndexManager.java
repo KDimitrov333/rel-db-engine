@@ -80,6 +80,29 @@ public class IndexManager {
         return results;
     }
 
+    /**
+     * Range lookup using an index. Returns all records whose indexed key is in [lowInclusive, highInclusive].
+     * If the range is empty (low > high) an empty list is returned.
+     */
+    public List<Record> rangeLookup(String indexName, int lowInclusive, int highInclusive) {
+        if (lowInclusive > highInclusive) return List.of();
+        IndexState state = indexStates.get(indexName);
+        if (state == null) throw new IllegalArgumentException("Index not found: " + indexName);
+
+        IndexSchema iSchema = catalog.getIndexSchema(indexName);
+        String table = (iSchema != null) ? iSchema.table() : state.tableName;
+        List<Record> records = storage.scanTable(table);
+
+        List<Integer> rids = state.tree.rangeSearch(lowInclusive, highInclusive);
+        List<Record> results = new ArrayList<>();
+        for (int rid : rids) {
+            if (rid >= 0 && rid < records.size()) {
+                results.add(records.get(rid));
+            }
+        }
+        return results;
+    }
+
     // To be called by StorageManager after a successful insert
     public void onTableInsert(String tableName, Record newRecord) {
         int rid = tableRowCounts.getOrDefault(tableName, 0);
