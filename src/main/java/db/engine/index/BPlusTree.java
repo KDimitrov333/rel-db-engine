@@ -25,22 +25,45 @@ public class BPlusTree {
         return order;
     }
 
-    // Insert (key, recordId)
-    public void insert(int key, int recordId) {
-        Node r = root;
-        if (r.keys.size() == maxKeys) {
-            // root is full, split
-            Node newRoot = new Node(false);
-            newRoot.children.add(r);
-            splitChild(newRoot, 0, r);
-            root = newRoot;
-        }
-        insertNonFull(root, key, recordId);
-    }
-
     // Search for key
     public List<Integer> search(int key) { return searchRecursive(root, key); }
 
+    private List<Integer> searchRecursive(Node node, int key) {
+        if (node.isLeaf) {
+            int pos = lowerBound(node.keys, key); // first >= key
+            if (pos < node.keys.size() && node.keys.get(pos) == key) {
+                return List.copyOf(node.values.get(pos));
+            }
+            return Collections.emptyList();
+        }
+        int childIndex = upperBound(node.keys, key); // first > key
+        return searchRecursive(node.children.get(childIndex), key);
+    }
+
+    // lowerBound: first index with keys[i] >= key (or keys.size() if none).
+    // Used for leaf insertion and range scan start.
+    private int lowerBound(List<Integer> keys, int key) {
+        int lo = 0, hi = keys.size();
+        while (lo < hi) {
+            int mid = (lo + hi) / 2;
+            if (keys.get(mid) < key) lo = mid + 1; else hi = mid;
+        }
+        return lo;
+    }
+
+    // upperBound: first index with keys[i] > key (or keys.size() if none).
+    // Used for internal routing: childIndex = upperBound(separators, key) where equal keys go right.
+    private int upperBound(List<Integer> keys, int key) {
+        int lo = 0, hi = keys.size();
+        while (lo < hi) {
+            int mid = (lo + hi) / 2;
+            if (keys.get(mid) <= key) lo = mid + 1; else hi = mid;
+        }
+        return lo;
+    }
+
+
+    //Range search
     /**
      * Range search: returns all record ids whose key is in [lowInclusive, highInclusive].
      * Keys returned preserve ascending key order; duplicate key record ids preserve insertion order.
@@ -74,16 +97,18 @@ public class BPlusTree {
         return current;
     }
 
-    private List<Integer> searchRecursive(Node node, int key) {
-        if (node.isLeaf) {
-            int pos = lowerBound(node.keys, key); // first >= key
-            if (pos < node.keys.size() && node.keys.get(pos) == key) {
-                return node.values.get(pos);
-            }
-            return Collections.emptyList();
+    
+    // Insert (key, recordId)
+    public void insert(int key, int recordId) {
+        Node r = root;
+        if (r.keys.size() == maxKeys) {
+            // root is full, split
+            Node newRoot = new Node(false);
+            newRoot.children.add(r);
+            splitChild(newRoot, 0, r);
+            root = newRoot;
         }
-        int childIndex = upperBound(node.keys, key); // first > key
-        return searchRecursive(node.children.get(childIndex), key);
+        insertNonFull(root, key, recordId);
     }
 
     // Insert into non-full node
@@ -166,28 +191,6 @@ public class BPlusTree {
         // Parent takes median and pointer to new right sibling
         parent.keys.add(index, medianKey);
         parent.children.add(index + 1, sibling);
-    }
-
-    // lowerBound: first index with keys[i] >= key (or keys.size() if none).
-    // Used for leaf insertion and range scan start.
-    private int lowerBound(List<Integer> keys, int key) {
-        int lo = 0, hi = keys.size();
-        while (lo < hi) {
-            int mid = (lo + hi) / 2;
-            if (keys.get(mid) < key) lo = mid + 1; else hi = mid;
-        }
-        return lo;
-    }
-
-    // upperBound: first index with keys[i] > key (or keys.size() if none).
-    // Used for internal routing: childIndex = upperBound(separators, key) where equal keys go right.
-    private int upperBound(List<Integer> keys, int key) {
-        int lo = 0, hi = keys.size();
-        while (lo < hi) {
-            int mid = (lo + hi) / 2;
-            if (keys.get(mid) <= key) lo = mid + 1; else hi = mid;
-        }
-        return lo;
     }
 
     // Internal node structure
