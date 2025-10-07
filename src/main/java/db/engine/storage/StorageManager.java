@@ -3,6 +3,7 @@ package db.engine.storage;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.RandomAccessFile;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -26,8 +27,15 @@ public class StorageManager {
         this.indexManager = indexManager;
     }
 
-    // Inserts a record into the table file
+    // Inserts a record into the table file - old method, does not expose RID
     public void insertRecord(String tableName, Record record) {
+        insertRecordWithRid(tableName, record); // discard RID
+    }
+
+    /**
+     * Inserts a record and returns its RID (file offset of the length prefix).
+     */
+    public RID insertRecordWithRid(String tableName, Record record) {
         TableSchema tSchema = catalog.getTableSchema(tableName);
         if (tSchema == null) {
             throw new IllegalArgumentException("Table not found: " + tableName);
@@ -37,17 +45,47 @@ public class StorageManager {
         validateRecord(columns, record);
         byte[] data = record.toBytes(columns);
 
-        try (FileOutputStream fos = new FileOutputStream(tSchema.filePath(), true)) {
-            // write record length (4-byte big-endian)
+        File file = new File(tSchema.filePath());
+        long offsetBeforeWrite = file.length(); // start of length prefix
+
+        try (FileOutputStream fos = new FileOutputStream(file, true)) {
             fos.write(ByteBuffer.allocate(4).putInt(data.length).array());
-            // write record bytes
             fos.write(data);
-            // Only notify indexes if write succeeded
             if (indexManager != null) {
                 indexManager.onTableInsert(tableName, record);
             }
         } catch (IOException e) {
             e.printStackTrace();
+            return null; // signal failure
+        }
+        return new RID(offsetBeforeWrite);
+    }
+
+    /**
+     * Reads a single record given its RID.
+     * @param tableName table to read from
+     * @param rid record identifier returned by insertRecordWithRid
+     * @return deserialized Record
+     */
+    public Record readRecordByRid(String tableName, RID rid) {
+        TableSchema tSchema = catalog.getTableSchema(tableName);
+        if (tSchema == null) {
+            throw new IllegalArgumentException("Table not found: " + tableName);
+        }
+        List<ColumnSchema> columns = tSchema.columns();
+
+        try (RandomAccessFile raf = new RandomAccessFile(tSchema.filePath(), "r")) {
+            if (rid.offset() < 0 || rid.offset() >= raf.length()) {
+                throw new IllegalArgumentException("RID offset out of bounds: " + rid.offset());
+            }
+            raf.seek(rid.offset());
+            int len = raf.readInt();
+            if (len < 0) throw new IOException("Negative record length at offset " + rid.offset());
+            byte[] buf = new byte[len];
+            raf.readFully(buf);
+            return Record.fromBytes(buf, columns);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read record at RID=" + rid.offset() + " in table " + tableName, e);
         }
     }
 
