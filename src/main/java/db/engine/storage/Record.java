@@ -32,17 +32,13 @@ public class Record {
             Object val = values.get(i);
 
             switch (col.type()) {
-                case "INT":
-                    buffer.putInt((int) val);
-                    break;
-                case "BOOLEAN":
-                    buffer.put((byte) ((Boolean) val ? 1 : 0));
-                    break;
-                case "VARCHAR":
+                case INT -> buffer.putInt((int) val);
+                case BOOLEAN -> buffer.put((byte) ((Boolean) val ? 1 : 0));
+                case VARCHAR -> {
                     byte[] strBytes = ((String) val).getBytes(StandardCharsets.UTF_8);
                     buffer.putInt(strBytes.length);
                     buffer.put(strBytes);
-                    break;
+                }
             }
         }
 
@@ -55,9 +51,9 @@ public class Record {
             ColumnSchema col = columns.get(i);
             Object val = values.get(i);
             switch (col.type()) {
-                case "INT" -> size += INT_BYTES;
-                case "BOOLEAN" -> size += BOOLEAN_BYTES;
-                case "VARCHAR" -> {
+                case INT -> size += INT_BYTES;
+                case BOOLEAN -> size += BOOLEAN_BYTES;
+                case VARCHAR -> {
                     String s = (String) val;
                     size += VARCHAR_PREFIX_BYTES + s.getBytes(StandardCharsets.UTF_8).length;
                 }
@@ -73,18 +69,14 @@ public class Record {
 
         for (ColumnSchema col : columns) {
             switch (col.type()) {
-                case "INT":
-                    values.add(buffer.getInt());
-                    break;
-                case "BOOLEAN":
-                    values.add(buffer.get() == 1);
-                    break;
-                case "VARCHAR":
+                case INT -> values.add(buffer.getInt());
+                case BOOLEAN -> values.add(buffer.get() == 1);
+                case VARCHAR -> {
                     int len = buffer.getInt();
                     byte[] strBytes = new byte[len];
                     buffer.get(strBytes);
                     values.add(new String(strBytes, StandardCharsets.UTF_8));
-                    break;
+                }
             }
         }
 

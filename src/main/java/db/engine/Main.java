@@ -2,6 +2,7 @@ package db.engine;
 
 import db.engine.catalog.CatalogManager;
 import db.engine.catalog.ColumnSchema;
+import db.engine.catalog.DataType;
 import db.engine.catalog.TableSchema;
 import db.engine.storage.Record;
 import db.engine.storage.StorageManager;
@@ -18,9 +19,9 @@ public class Main {
         TableSchema schema = new TableSchema(
             "students",
             List.of(
-                new ColumnSchema("id", "INT", 0),
-                new ColumnSchema("name", "VARCHAR", 50),
-                new ColumnSchema("active", "BOOLEAN", 0)
+                new ColumnSchema("id", DataType.INT, 0),
+                new ColumnSchema("name", DataType.VARCHAR, 50),
+                new ColumnSchema("active", DataType.BOOLEAN, 0)
             ),
             "data/students.tbl"
         );

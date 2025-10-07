@@ -112,26 +112,28 @@ public class StorageManager {
             ColumnSchema col = columns.get(i);
             Object v = vals.get(i);
             switch (col.type()) {
-                case "INT" -> {
+                case INT -> {
                     if (!(v instanceof Integer)) {
                         throw typeError(col, v);
                     }
                 }
-                case "BOOLEAN" -> {
+                case BOOLEAN -> {
                     if (!(v instanceof Boolean)) {
                         throw typeError(col, v);
                     }
                 }
-                case "VARCHAR" -> {
+                case VARCHAR -> {
                     if (!(v instanceof String s)) {
                         throw typeError(col, v);
                     }
                     int max = col.length();
-                    if (max > 0 && s.length() > max) {
-                        throw new IllegalArgumentException("Value too long for column '" + col.name() + "' (max=" + max + ", got=" + s.length() + ")");
+                    if (max > 0) {
+                        int byteLen = s.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+                        if (byteLen > max) {
+                            throw new IllegalArgumentException("Value too long for column '" + col.name() + "' (max=" + max + " bytes, got=" + byteLen + ")");
+                        }
                     }
                 }
-                default -> throw new IllegalArgumentException("Unsupported column type: " + col.type());
             }
         }
     }

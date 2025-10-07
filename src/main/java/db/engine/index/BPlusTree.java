@@ -153,22 +153,34 @@ public class BPlusTree {
 
     // Split a full leaf node; promote first key of the new right sibling
     private void splitLeafChild(Node parent, int index, Node leaf) {
-        int mid = medianKeyIndex;
+        int total = leaf.keys.size(); // == maxKeys prior to split
         Node sibling = new Node(true);
 
-        // Copy right side to sibling
-        for (int i = mid + 1; i < leaf.keys.size(); i++) sibling.keys.add(leaf.keys.get(i));
-        for (int i = mid + 1; i < leaf.values.size(); i++) sibling.values.add(leaf.values.get(i));
+        // Balanced split: left gets ceil(total/2), right gets the rest.
+        int leftSize = (total + 1) / 2; // ensures left >= right when odd
+        int rightSize = total - leftSize;
 
-        // Link leaf chain
+        // Move rightSize entries from end of leaf to sibling (preserve order)
+        List<Integer> moveKeys = new ArrayList<>(rightSize);
+        List<List<Integer>> moveVals = new ArrayList<>(rightSize);
+        for (int i = total - rightSize; i < total; i++) {
+            moveKeys.add(leaf.keys.get(i));
+            moveVals.add(leaf.values.get(i));
+        }
+
+        // Trim leaf down to leftSize
+        while (leaf.keys.size() > leftSize) leaf.keys.remove(leaf.keys.size() - 1);
+        while (leaf.values.size() > leftSize) leaf.values.remove(leaf.values.size() - 1);
+
+        // Assign sibling contents
+        sibling.keys.addAll(moveKeys);
+        sibling.values.addAll(moveVals);
+
+        // Chain leaves
         sibling.next = leaf.next;
         leaf.next = sibling;
 
-        // Trim original leaf (retain inclusive mid)
-        while (leaf.keys.size() > mid + 1) leaf.keys.remove(leaf.keys.size() - 1);
-        while (leaf.values.size() > mid + 1) leaf.values.remove(leaf.values.size() - 1);
-
-        // Promote first key of sibling (copy-up style)
+        // Promote first key of sibling to parent
         parent.keys.add(index, sibling.keys.get(0));
         parent.children.add(index + 1, sibling);
     }

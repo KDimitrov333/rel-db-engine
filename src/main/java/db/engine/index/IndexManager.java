@@ -4,6 +4,7 @@ import db.engine.catalog.CatalogManager;
 import db.engine.catalog.IndexSchema;
 import db.engine.catalog.TableSchema;
 import db.engine.catalog.ColumnSchema;
+import db.engine.catalog.DataType;
 import db.engine.storage.Record;
 import db.engine.storage.StorageManager;
 
@@ -33,7 +34,7 @@ public class IndexManager {
         List<ColumnSchema> cols = tSchema.columns();
         int colIndex = findColumnIndex(cols, columnName);
         if (colIndex == -1) throw new IllegalArgumentException("Column not found: " + columnName);
-        if (!cols.get(colIndex).type().equals("INT")) {
+        if (cols.get(colIndex).type() != DataType.INT) {
             throw new IllegalArgumentException("Indexing only supported on INT columns");
         }
 
