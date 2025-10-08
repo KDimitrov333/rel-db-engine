@@ -52,7 +52,7 @@ public class StorageManager {
             fos.write(ByteBuffer.allocate(4).putInt(data.length).array());
             fos.write(data);
             if (indexManager != null) {
-                indexManager.onTableInsert(tableName, record);
+                indexManager.onTableInsert(tableName, new RID(offsetBeforeWrite), record);
             }
         } catch (IOException e) {
             e.printStackTrace();
@@ -138,6 +138,49 @@ public class StorageManager {
         }
 
         return results;
+    }
+
+    /**
+     * Full table scan returning each record with its RID
+     */
+    public List<TableRow> scanTableWithRids(String tableName) {
+        TableSchema tSchema = catalog.getTableSchema(tableName);
+        if (tSchema == null) {
+            throw new IllegalArgumentException("Table not found:" + tableName);
+        }
+        List<TableRow> rows = new ArrayList<>();
+        List<ColumnSchema> columns = tSchema.columns();
+        long offset = 0L;
+        try (FileInputStream fis = new FileInputStream(tSchema.filePath())) {
+            byte[] lenBuf = new byte[4];
+            while (true) {
+                long recordStart = offset; // RID offset begins at length prefix
+                int readLenBytes = fis.read(lenBuf);
+                if (readLenBytes == -1) break; // EOF
+                if (readLenBytes != 4) {
+                    System.err.println("[StorageManager] Incomplete length field at offset " + recordStart);
+                    break;
+                }
+                offset += 4;
+                int recordLen = ByteBuffer.wrap(lenBuf).getInt();
+                if (recordLen <= 0) {
+                    System.err.println("[StorageManager] Invalid record length " + recordLen + " at offset " + recordStart);
+                    break;
+                }
+                byte[] recordBuf = new byte[recordLen];
+                int readData = fis.read(recordBuf);
+                if (readData != recordLen) {
+                    System.err.println("[StorageManager] Truncated record (expected=" + recordLen + ", got=" + readData + ") at offset " + recordStart);
+                    break;
+                }
+                offset += readData;
+                Record rec = Record.fromBytes(recordBuf, columns);
+                rows.add(new TableRow(new RID(recordStart), rec));
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return rows;
     }
 
     // Validation: arity, type consistency, VARCHAR length constraint

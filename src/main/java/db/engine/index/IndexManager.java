@@ -7,6 +7,8 @@ import db.engine.catalog.ColumnSchema;
 import db.engine.catalog.DataType;
 import db.engine.storage.Record;
 import db.engine.storage.StorageManager;
+import db.engine.storage.RID;
+import db.engine.storage.TableRow;
 
 import java.io.File;
 import java.io.IOException;
@@ -16,13 +18,11 @@ public class IndexManager {
     private CatalogManager catalog;
     private StorageManager storage;
     private final Map<String, IndexState> indexStates;
-    private final Map<String, Integer> tableRowCounts;
 
     public IndexManager(CatalogManager catalog, StorageManager storage) {
         this.catalog = catalog;
         this.storage = storage;
         this.indexStates = new HashMap<>();
-        this.tableRowCounts = new HashMap<>();
         this.storage.attachIndexManager(this);
     }
 
@@ -38,18 +38,18 @@ public class IndexManager {
             throw new IllegalArgumentException("Indexing only supported on INT columns");
         }
 
-        // Build in-memory B+ tree
+        // Build in-memory B+ tree using RIDs
         BPlusTree tree = new BPlusTree(4);
-        List<Record> records = storage.scanTable(tableName);
-        for (int rid = 0; rid < records.size(); rid++) {
-            int key = (Integer) records.get(rid).getValues().get(colIndex);
-            tree.insert(key, rid);
+        List<TableRow> rows = storage.scanTableWithRids(tableName);
+        for (TableRow row : rows) {
+            Object v = row.record().getValues().get(colIndex);
+            if (!(v instanceof Integer)) {
+                throw new IllegalStateException("Indexed column expected INT but found: " + (v == null ? "null" : v.getClass().getSimpleName()));
+            }
+            tree.insert((Integer) v, row.rid().offset());
         }
 
         indexStates.put(indexName, new IndexState(indexName, tableName, columnName, colIndex, tree));
-
-        // Initialize / update row count baseline (only set if absent to retain longest-lived counter)
-        tableRowCounts.putIfAbsent(tableName, records.size());
 
         // Register index in catalog
         IndexSchema iSchema = new IndexSchema(indexName, tableName, columnName, "indexes/" + indexName + ".idx");
@@ -71,14 +71,12 @@ public class IndexManager {
 
         IndexSchema iSchema = catalog.getIndexSchema(indexName);
         String table = (iSchema != null) ? iSchema.table() : state.tableName;
-        List<Record> records = storage.scanTable(table);
-
-        List<Integer> rids = state.tree.search(key);
-        List<Record> results = new ArrayList<>();
-        for (int rid : rids) {
-            results.add(records.get(rid));
+        List<Long> ridOffsets = state.tree.search(key);
+        List<Record> out = new ArrayList<>(ridOffsets.size());
+        for (long off : ridOffsets) {
+            out.add(storage.readRecordByRid(table, new RID(off)));
         }
-        return results;
+        return out;
     }
 
     /**
@@ -92,30 +90,24 @@ public class IndexManager {
 
         IndexSchema iSchema = catalog.getIndexSchema(indexName);
         String table = (iSchema != null) ? iSchema.table() : state.tableName;
-        List<Record> records = storage.scanTable(table);
-
-        List<Integer> rids = state.tree.rangeSearch(lowInclusive, highInclusive);
-        List<Record> results = new ArrayList<>();
-        for (int rid : rids) {
-            if (rid >= 0 && rid < records.size()) {
-                results.add(records.get(rid));
-            }
+        List<Long> ridOffsets = state.tree.rangeSearch(lowInclusive, highInclusive);
+        List<Record> out = new ArrayList<>(ridOffsets.size());
+        for (long off : ridOffsets) {
+            out.add(storage.readRecordByRid(table, new RID(off)));
         }
-        return results;
+        return out;
     }
 
     // To be called by StorageManager after a successful insert
-    public void onTableInsert(String tableName, Record newRecord) {
-        int rid = tableRowCounts.getOrDefault(tableName, 0);
+    public void onTableInsert(String tableName, RID rid, Record newRecord) {
         for (IndexState state : indexStates.values()) {
             if (!state.tableName.equals(tableName)) continue;
             Object val = newRecord.getValues().get(state.columnIndex);
             if (!(val instanceof Integer)) {
                 throw new IllegalStateException("Indexed column expected INT but found: " + (val == null ? "null" : val.getClass().getSimpleName()));
             }
-            state.tree.insert((Integer) val, rid);
+            state.tree.insert((Integer) val, rid.offset());
         }
-        tableRowCounts.put(tableName, rid + 1);
     }
 
     // Helper: find column index by name, returns -1 if not found.

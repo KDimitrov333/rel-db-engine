@@ -25,10 +25,10 @@ public class BPlusTree {
         return order;
     }
 
-    // Search for key
-    public List<Integer> search(int key) { return searchRecursive(root, key); }
+    // Search for key - return immutable list of RID offsets (may be empty)
+    public List<Long> search(int key) { return searchRecursive(root, key); }
 
-    private List<Integer> searchRecursive(Node node, int key) {
+    private List<Long> searchRecursive(Node node, int key) {
         if (node.isLeaf) {
             int pos = lowerBound(node.keys, key); // first >= key
             if (pos < node.keys.size() && node.keys.get(pos) == key) {
@@ -68,8 +68,8 @@ public class BPlusTree {
      * Range search: returns all record ids whose key is in [lowInclusive, highInclusive].
      * Keys returned preserve ascending key order; duplicate key record ids preserve insertion order.
      */
-    public List<Integer> rangeSearch(int lowInclusive, int highInclusive) {
-        List<Integer> result = new ArrayList<>();
+    public List<Long> rangeSearch(int lowInclusive, int highInclusive) {
+        List<Long> result = new ArrayList<>();
         if (lowInclusive > highInclusive) return result;
         Node leaf = findLeaf(lowInclusive);
         if (leaf == null) return result;
@@ -98,8 +98,8 @@ public class BPlusTree {
     }
 
     
-    // Insert (key, recordId)
-    public void insert(int key, int recordId) {
+    // Insert (key, RID offset)
+    public void insert(int key, long ridOffset) {
         Node r = root;
         if (r.keys.size() == maxKeys) {
             // root is full, split
@@ -108,13 +108,13 @@ public class BPlusTree {
             splitChild(newRoot, 0, r);
             root = newRoot;
         }
-        insertNonFull(root, key, recordId);
+        insertNonFull(root, key, ridOffset);
     }
 
     // Insert into non-full node
-    private void insertNonFull(Node node, int key, int recordId) {
+    private void insertNonFull(Node node, int key, long ridOffset) {
         if (node.isLeaf) {
-            leafInsert(node, key, recordId);
+            leafInsert(node, key, ridOffset);
         } else {
             int pos = upperBound(node.keys, key);
 
@@ -125,19 +125,19 @@ public class BPlusTree {
                     pos++;
                 }
             }
-            insertNonFull(node.children.get(pos), key, recordId);
+            insertNonFull(node.children.get(pos), key, ridOffset);
         }
     }
 
     // Insert into a leaf node at correct sorted position (or append to existing key's RID list)
-    private void leafInsert(Node leaf, int key, int recordId) {
+    private void leafInsert(Node leaf, int key, long ridOffset) {
         int pos = lowerBound(leaf.keys, key);
         if (pos < leaf.keys.size() && leaf.keys.get(pos) == key) {
-            leaf.values.get(pos).add(recordId);
+            leaf.values.get(pos).add(ridOffset);
         } else {
             leaf.keys.add(pos, key);
-            List<Integer> list = new ArrayList<>();
-            list.add(recordId);
+            List<Long> list = new ArrayList<>();
+            list.add(ridOffset);
             leaf.values.add(pos, list);
         }
     }
@@ -162,7 +162,7 @@ public class BPlusTree {
 
         // Move rightSize entries from end of leaf to sibling (preserve order)
         List<Integer> moveKeys = new ArrayList<>(rightSize);
-        List<List<Integer>> moveVals = new ArrayList<>(rightSize);
+        List<List<Long>> moveVals = new ArrayList<>(rightSize);
         for (int i = total - rightSize; i < total; i++) {
             moveKeys.add(leaf.keys.get(i));
             moveVals.add(leaf.values.get(i));
@@ -210,7 +210,7 @@ public class BPlusTree {
         final boolean isLeaf;
         final List<Integer> keys;
         final List<Node> children;        // internal nodes only (null for leaves)
-        final List<List<Integer>> values; // leaf nodes only (null for internals)
+        final List<List<Long>> values;    // leaf nodes only (null for internals)
         Node next;                        // link leaf nodes (mutable linkage)
 
         Node(boolean isLeaf) {
