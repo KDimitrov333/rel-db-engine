@@ -3,7 +3,6 @@ package db.engine.storage;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.RandomAccessFile;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,9 +16,14 @@ import db.engine.catalog.TableSchema;
 public class StorageManager {
     private CatalogManager catalog;
     private IndexManager indexManager; // optional; may be set after construction
+    private final BufferManager bufferManager;
+
+    // Fixed page size for initial buffer manager introduction
+    public static final int PAGE_SIZE = 4096;
 
     public StorageManager(CatalogManager catalog) {
         this.catalog = catalog;
+        this.bufferManager = new BufferManager(PAGE_SIZE, 64); // capacity 64 pages
     }
 
     // Allow late binding to avoid circular construction concerns
@@ -58,6 +62,11 @@ public class StorageManager {
             e.printStackTrace();
             return null; // signal failure
         }
+        // Invalidate affected pages in buffer cache
+        long endOffset = offsetBeforeWrite + 4L + data.length;
+        int startPage = (int) (offsetBeforeWrite / PAGE_SIZE);
+        int endPage = (int) ((endOffset - 1) / PAGE_SIZE);
+        bufferManager.invalidateRange(file.getPath(), startPage, endPage);
         return new RID(offsetBeforeWrite);
     }
 
@@ -74,19 +83,19 @@ public class StorageManager {
         }
         List<ColumnSchema> columns = tSchema.columns();
 
-        try (RandomAccessFile raf = new RandomAccessFile(tSchema.filePath(), "r")) {
-            if (rid.offset() < 0 || rid.offset() >= raf.length()) {
-                throw new IllegalArgumentException("RID offset out of bounds: " + rid.offset());
-            }
-            raf.seek(rid.offset());
-            int len = raf.readInt();
-            if (len < 0) throw new IOException("Negative record length at offset " + rid.offset());
-            byte[] buf = new byte[len];
-            raf.readFully(buf);
-            return Record.fromBytes(buf, columns);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to read record at RID=" + rid.offset() + " in table " + tableName, e);
+        String path = tSchema.filePath();
+        long offset = rid.offset();
+        File file = new File(path);
+        long fileLen = file.length();
+        if (offset < 0 || offset >= fileLen) {
+            throw new IllegalArgumentException("RID offset out of bounds: " + offset);
         }
+        // Read length prefix (may cross a page boundary)
+        byte[] lenBytes = readBytes(path, offset, 4);
+        int len = ByteBuffer.wrap(lenBytes).getInt();
+        if (len < 0) throw new RuntimeException("Negative record length at offset " + offset);
+        byte[] recBytes = readBytes(path, offset + 4, len);
+        return Record.fromBytes(recBytes, columns);
     }
 
     public void createTable(TableSchema schema) {
@@ -221,5 +230,35 @@ public class StorageManager {
 
     private IllegalArgumentException typeError(ColumnSchema col, Object v) {
         return new IllegalArgumentException("Type mismatch for column '" + col.name() + "' expected " + col.type() + ", got " + (v == null ? "null" : v.getClass().getSimpleName()));
+    }
+
+    /**
+     * Read an arbitrary byte range using the buffer manager (spanning pages if needed)
+     */
+    private byte[] readBytes(String filePath, long offset, int length) {
+        if (length < 0) throw new IllegalArgumentException("Negative length");
+        byte[] out = new byte[length];
+        int pageSize = bufferManager.getPageSize();
+        int firstPage = (int) (offset / pageSize);
+        int lastPage = (int) ((offset + length - 1) / pageSize);
+        int destPos = 0;
+        long currentOffset = offset;
+        for (int pageId = firstPage; pageId <= lastPage; pageId++) {
+            Page page;
+            try {
+                page = bufferManager.getPage(filePath, pageId);
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to load page " + pageId + " for file " + filePath, e);
+            }
+            long pageStart = (long) pageId * pageSize;
+            int withinPageStart = (int) (currentOffset - pageStart);
+            int bytesAvailable = pageSize - withinPageStart;
+            int bytesNeeded = length - destPos;
+            int toCopy = Math.min(bytesAvailable, bytesNeeded);
+            System.arraycopy(page.data(), withinPageStart, out, destPos, toCopy);
+            destPos += toCopy;
+            currentOffset += toCopy;
+        }
+        return out;
     }
 }
