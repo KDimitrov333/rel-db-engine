@@ -233,6 +233,62 @@ public class StorageManager {
     }
 
     /**
+     * Insert using heap page layout (PageRID).
+     * Not yet supported.
+     */
+    public PageRID insertRecordHeap(String tableName, Record record) {
+        TableSchema tSchema = catalog.getTableSchema(tableName);
+        if (tSchema == null) throw new IllegalArgumentException("Table not found: " + tableName);
+        List<ColumnSchema> columns = tSchema.columns();
+        validateRecord(columns, record);
+
+        byte[] payload = record.toBytes(columns);
+        if (payload.length > 0xFFFF) {
+            throw new IllegalArgumentException("Record too large for current heap page format (len=" + payload.length + ")");
+        }
+
+        File file = new File(tSchema.filePath());
+        try {
+            file.getParentFile().mkdirs();
+            file.createNewFile();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        long fileLen = file.length();
+        int lastPageId = (int) (fileLen / PAGE_SIZE);
+        boolean aligned = (fileLen % PAGE_SIZE) == 0; // true if no partial page at end
+        int targetPageId = aligned ? Math.max(lastPageId - 1, 0) : lastPageId; // if empty file -> page 0
+
+        byte[] pageBytes;
+        try {
+            pageBytes = bufferManager.getPage(file.getPath(), targetPageId).data();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to load page " + targetPageId, e);
+        }
+        HeapPage heapPage = HeapPage.wrap(file.getPath(), targetPageId, pageBytes, PAGE_SIZE);
+
+        if (!heapPage.canFit(payload.length)) {
+            targetPageId = aligned ? lastPageId : lastPageId + 1; // append new page at end
+            pageBytes = new byte[PAGE_SIZE];
+            heapPage = HeapPage.wrap(file.getPath(), targetPageId, pageBytes, PAGE_SIZE);
+        }
+
+        int slotId = heapPage.insert(payload);
+
+        // Persist page
+        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "rw")) {
+            raf.seek((long) targetPageId * PAGE_SIZE);
+            raf.write(heapPage.rawData());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed writing heap page " + targetPageId, e);
+        }
+        bufferManager.invalidate(file.getPath(), targetPageId);
+
+        return new PageRID(targetPageId, slotId);
+    }
+
+    /**
      * Read an arbitrary byte range using the buffer manager (spanning pages if needed)
      */
     private byte[] readBytes(String filePath, long offset, int length) {
