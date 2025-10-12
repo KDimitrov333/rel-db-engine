@@ -1,12 +1,9 @@
 package db.engine.storage;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.nio.ByteBuffer;
 
 import db.engine.catalog.CatalogManager;
 import db.engine.catalog.ColumnSchema;
@@ -31,73 +28,6 @@ public class StorageManager {
         this.indexManager = indexManager;
     }
 
-    // Inserts a record into the table file - old method, does not expose RID
-    public void insertRecord(String tableName, Record record) {
-        insertRecordWithRid(tableName, record); // discard RID
-    }
-
-    /**
-     * Inserts a record and returns its RID (file offset of the length prefix).
-     */
-    public RID insertRecordWithRid(String tableName, Record record) {
-        TableSchema tSchema = catalog.getTableSchema(tableName);
-        if (tSchema == null) {
-            throw new IllegalArgumentException("Table not found: " + tableName);
-        }
-
-        List<ColumnSchema> columns = tSchema.columns();
-        validateRecord(columns, record);
-        byte[] data = record.toBytes(columns);
-
-        File file = new File(tSchema.filePath());
-        long offsetBeforeWrite = file.length(); // start of length prefix
-
-        try (FileOutputStream fos = new FileOutputStream(file, true)) {
-            fos.write(ByteBuffer.allocate(4).putInt(data.length).array());
-            fos.write(data);
-            if (indexManager != null) {
-                indexManager.onTableInsert(tableName, new RID(offsetBeforeWrite), record);
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-            return null; // signal failure
-        }
-        // Invalidate affected pages in buffer cache
-        long endOffset = offsetBeforeWrite + 4L + data.length;
-        int startPage = (int) (offsetBeforeWrite / PAGE_SIZE);
-        int endPage = (int) ((endOffset - 1) / PAGE_SIZE);
-        bufferManager.invalidateRange(file.getPath(), startPage, endPage);
-        return new RID(offsetBeforeWrite);
-    }
-
-    /**
-     * Reads a single record given its RID.
-     * @param tableName table to read from
-     * @param rid record identifier returned by insertRecordWithRid
-     * @return deserialized Record
-     */
-    public Record readRecordByRid(String tableName, RID rid) {
-        TableSchema tSchema = catalog.getTableSchema(tableName);
-        if (tSchema == null) {
-            throw new IllegalArgumentException("Table not found: " + tableName);
-        }
-        List<ColumnSchema> columns = tSchema.columns();
-
-        String path = tSchema.filePath();
-        long offset = rid.offset();
-        File file = new File(path);
-        long fileLen = file.length();
-        if (offset < 0 || offset >= fileLen) {
-            throw new IllegalArgumentException("RID offset out of bounds: " + offset);
-        }
-        // Read length prefix (may cross a page boundary)
-        byte[] lenBytes = readBytes(path, offset, 4);
-        int len = ByteBuffer.wrap(lenBytes).getInt();
-        if (len < 0) throw new RuntimeException("Negative record length at offset " + offset);
-        byte[] recBytes = readBytes(path, offset + 4, len);
-        return Record.fromBytes(recBytes, columns);
-    }
-
     public void createTable(TableSchema schema) {
         catalog.registerTable(schema);
 
@@ -111,85 +41,47 @@ public class StorageManager {
         }
     }
 
-    public List<Record> scanTable(String tableName) {
-        TableSchema tSchema = catalog.getTableSchema(tableName);
-        if (tSchema == null) {
-            throw new IllegalArgumentException("Table not found:" + tableName);
-        }
+    public PageRID insert(String tableName, Record record) { return doHeapInsert(tableName, record); }
 
-        List<Record> results = new ArrayList<>();
-        List<ColumnSchema> columns = tSchema.columns();
-
-        long offset = 0L;
-        try (FileInputStream fis = new FileInputStream(tSchema.filePath())) {
-            byte[] bufLen = new byte[4];
-
-            while (fis.read(bufLen) == 4) {
-                offset += 4;
-                int recordLen = ByteBuffer.wrap(bufLen).getInt();
-                if (recordLen <= 0) {
-                    System.err.println("[StorageManager] Invalid record length " + recordLen + " at offset " + (offset - 4));
-                    break;
-                }
-                byte[] recordBuf = new byte[recordLen];
-                int read = fis.read(recordBuf);
-                if (read != recordLen) {
-                    System.err.println("[StorageManager] Truncated record (expected=" + recordLen + ", got=" + read + ") at offset " + (offset - 4));
-                    break;
-                }
-                offset += read;
-
-                Record rec = Record.fromBytes(recordBuf, columns);
-                results.add(rec);
-            }
+    public Record read(String tableName, PageRID rid) {
+        TableSchema ts = catalog.getTableSchema(tableName);
+        if (ts == null) throw new IllegalArgumentException("Table not found: " + tableName);
+        List<ColumnSchema> cols = ts.columns();
+        byte[] pageBytes;
+        try {
+            pageBytes = bufferManager.getPage(ts.filePath(), rid.pageId()).data();
         } catch (IOException e) {
-            e.printStackTrace();
+            throw new RuntimeException(e);
         }
-
-        return results;
+        HeapPage hp = HeapPage.wrap(ts.filePath(), rid.pageId(), pageBytes, PAGE_SIZE);
+        return hp.readRecord(rid.slotId(), cols);
     }
 
-    /**
-     * Full table scan returning each record with its RID
-     */
-    public List<TableRow> scanTableWithRids(String tableName) {
-        TableSchema tSchema = catalog.getTableSchema(tableName);
-        if (tSchema == null) {
-            throw new IllegalArgumentException("Table not found:" + tableName);
-        }
-        List<TableRow> rows = new ArrayList<>();
-        List<ColumnSchema> columns = tSchema.columns();
-        long offset = 0L;
-        try (FileInputStream fis = new FileInputStream(tSchema.filePath())) {
-            byte[] lenBuf = new byte[4];
-            while (true) {
-                long recordStart = offset; // RID offset begins at length prefix
-                int readLenBytes = fis.read(lenBuf);
-                if (readLenBytes == -1) break; // EOF
-                if (readLenBytes != 4) {
-                    System.err.println("[StorageManager] Incomplete length field at offset " + recordStart);
-                    break;
-                }
-                offset += 4;
-                int recordLen = ByteBuffer.wrap(lenBuf).getInt();
-                if (recordLen <= 0) {
-                    System.err.println("[StorageManager] Invalid record length " + recordLen + " at offset " + recordStart);
-                    break;
-                }
-                byte[] recordBuf = new byte[recordLen];
-                int readData = fis.read(recordBuf);
-                if (readData != recordLen) {
-                    System.err.println("[StorageManager] Truncated record (expected=" + recordLen + ", got=" + readData + ") at offset " + recordStart);
-                    break;
-                }
-                offset += readData;
-                Record rec = Record.fromBytes(recordBuf, columns);
-                rows.add(new TableRow(new RID(recordStart), rec));
+    // Functional-style scan using callback to avoid building large lists when not needed
+    public interface RowConsumer { void accept(PageRID rid, Record record); }
+
+    public void scan(String tableName, RowConsumer consumer) {
+        TableSchema ts = catalog.getTableSchema(tableName);
+        if (ts == null) throw new IllegalArgumentException("Table not found: " + tableName);
+        File f = new File(ts.filePath());
+        long fileLen = f.length();
+        if (fileLen == 0) return;
+        int pageCount = (int) ((fileLen + PAGE_SIZE - 1) / PAGE_SIZE);
+        List<ColumnSchema> cols = ts.columns();
+        for (int pid = 0; pid < pageCount; pid++) {
+            byte[] bytes;
+            try { bytes = bufferManager.getPage(ts.filePath(), pid).data(); } catch (IOException e) { throw new RuntimeException(e); }
+            HeapPage hp = HeapPage.wrap(ts.filePath(), pid, bytes, PAGE_SIZE);
+            for (int slotId : hp.liveSlotIds()) {
+                consumer.accept(new PageRID(pid, slotId), hp.readRecord(slotId, cols));
             }
-        } catch (IOException e) {
-            e.printStackTrace();
         }
-        return rows;
+    }
+
+    public List<Record> scanTable(String tableName) {
+        List<Record> out = new ArrayList<>();
+        scan(tableName, (rid, rec) -> out.add(rec));
+        return out;
     }
 
     // Validation: arity, type consistency, VARCHAR length constraint
@@ -232,11 +124,7 @@ public class StorageManager {
         return new IllegalArgumentException("Type mismatch for column '" + col.name() + "' expected " + col.type() + ", got " + (v == null ? "null" : v.getClass().getSimpleName()));
     }
 
-    /**
-     * Insert using heap page layout (PageRID).
-     * Not yet supported.
-     */
-    public PageRID insertRecordHeap(String tableName, Record record) {
+    private PageRID doHeapInsert(String tableName, Record record) {
         TableSchema tSchema = catalog.getTableSchema(tableName);
         if (tSchema == null) throw new IllegalArgumentException("Table not found: " + tableName);
         List<ColumnSchema> columns = tSchema.columns();
@@ -285,36 +173,10 @@ public class StorageManager {
         }
         bufferManager.invalidate(file.getPath(), targetPageId);
 
-        return new PageRID(targetPageId, slotId);
-    }
-
-    /**
-     * Read an arbitrary byte range using the buffer manager (spanning pages if needed)
-     */
-    private byte[] readBytes(String filePath, long offset, int length) {
-        if (length < 0) throw new IllegalArgumentException("Negative length");
-        byte[] out = new byte[length];
-        int pageSize = bufferManager.getPageSize();
-        int firstPage = (int) (offset / pageSize);
-        int lastPage = (int) ((offset + length - 1) / pageSize);
-        int destPos = 0;
-        long currentOffset = offset;
-        for (int pageId = firstPage; pageId <= lastPage; pageId++) {
-            Page page;
-            try {
-                page = bufferManager.getPage(filePath, pageId);
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to load page " + pageId + " for file " + filePath, e);
-            }
-            long pageStart = (long) pageId * pageSize;
-            int withinPageStart = (int) (currentOffset - pageStart);
-            int bytesAvailable = pageSize - withinPageStart;
-            int bytesNeeded = length - destPos;
-            int toCopy = Math.min(bytesAvailable, bytesNeeded);
-            System.arraycopy(page.data(), withinPageStart, out, destPos, toCopy);
-            destPos += toCopy;
-            currentOffset += toCopy;
+        PageRID rid = new PageRID(targetPageId, slotId);
+        if (indexManager != null) {
+            indexManager.onTableInsert(tableName, rid, record);
         }
-        return out;
+        return rid;
     }
 }

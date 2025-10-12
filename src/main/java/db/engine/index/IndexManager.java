@@ -5,10 +5,9 @@ import db.engine.catalog.IndexSchema;
 import db.engine.catalog.TableSchema;
 import db.engine.catalog.ColumnSchema;
 import db.engine.catalog.DataType;
-import db.engine.storage.Record;
 import db.engine.storage.StorageManager;
-import db.engine.storage.RID;
-import db.engine.storage.TableRow;
+import db.engine.storage.PageRID;
+import db.engine.storage.Record;
 
 import java.io.File;
 import java.io.IOException;
@@ -38,16 +37,15 @@ public class IndexManager {
             throw new IllegalArgumentException("Indexing only supported on INT columns");
         }
 
-        // Build in-memory B+ tree using RIDs
+        // Build in-memory B+ tree using PageRIDs via storage heap scan
         BPlusTree tree = new BPlusTree(4);
-        List<TableRow> rows = storage.scanTableWithRids(tableName);
-        for (TableRow row : rows) {
-            Object v = row.record().getValues().get(colIndex);
+        storage.scan(tableName, (pageRid, rec) -> {
+            Object v = rec.getValues().get(colIndex);
             if (!(v instanceof Integer)) {
                 throw new IllegalStateException("Indexed column expected INT but found: " + (v == null ? "null" : v.getClass().getSimpleName()));
             }
-            tree.insert((Integer) v, row.rid().offset());
-        }
+            tree.insert((Integer) v, pageRid);
+        });
 
         indexStates.put(indexName, new IndexState(indexName, tableName, columnName, colIndex, tree));
 
@@ -71,10 +69,10 @@ public class IndexManager {
 
         IndexSchema iSchema = catalog.getIndexSchema(indexName);
         String table = (iSchema != null) ? iSchema.table() : state.tableName;
-        List<Long> ridOffsets = state.tree.search(key);
-        List<Record> out = new ArrayList<>(ridOffsets.size());
-        for (long off : ridOffsets) {
-            out.add(storage.readRecordByRid(table, new RID(off)));
+        var rids = state.tree.search(key);
+        List<Record> out = new ArrayList<>(rids.size());
+        for (PageRID rid : rids) {
+            out.add(storage.read(table, rid));
         }
         return out;
     }
@@ -90,23 +88,23 @@ public class IndexManager {
 
         IndexSchema iSchema = catalog.getIndexSchema(indexName);
         String table = (iSchema != null) ? iSchema.table() : state.tableName;
-        List<Long> ridOffsets = state.tree.rangeSearch(lowInclusive, highInclusive);
-        List<Record> out = new ArrayList<>(ridOffsets.size());
-        for (long off : ridOffsets) {
-            out.add(storage.readRecordByRid(table, new RID(off)));
+        var rids = state.tree.rangeSearch(lowInclusive, highInclusive);
+        List<Record> out = new ArrayList<>(rids.size());
+        for (PageRID rid : rids) {
+            out.add(storage.read(table, rid));
         }
         return out;
     }
 
     // To be called by StorageManager after a successful insert
-    public void onTableInsert(String tableName, RID rid, Record newRecord) {
+    public void onTableInsert(String tableName, PageRID rid, Record newRecord) {
         for (IndexState state : indexStates.values()) {
             if (!state.tableName.equals(tableName)) continue;
             Object val = newRecord.getValues().get(state.columnIndex);
             if (!(val instanceof Integer)) {
                 throw new IllegalStateException("Indexed column expected INT but found: " + (val == null ? "null" : val.getClass().getSimpleName()));
             }
-            state.tree.insert((Integer) val, rid.offset());
+            state.tree.insert((Integer) val, rid);
         }
     }
 

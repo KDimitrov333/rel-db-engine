@@ -6,8 +6,7 @@ import db.engine.catalog.DataType;
 import db.engine.catalog.TableSchema;
 import db.engine.index.IndexManager;
 import db.engine.storage.Record;
-import db.engine.storage.RID;
-import db.engine.storage.TableRow;
+import db.engine.storage.PageRID;
 import db.engine.storage.StorageManager;
 
 import java.io.File;
@@ -49,18 +48,21 @@ public class Main {
             new Record(List.of(4, "Dave", false))
         );
 
-        List<RID> rids = new ArrayList<>();
+        List<PageRID> pageRids = new ArrayList<>();
         for (Record r : seed) {
-            RID rid = storage.insertRecordWithRid("students", r);
-            rids.add(rid);
+            PageRID rid = storage.insert("students", r);
+            pageRids.add(rid);
         }
         System.out.println("Inserted " + seed.size() + " rows (with duplicate id=2)\n");
 
-        // Full scan with RIDs
-        System.out.println("Full table scan with RIDs (offset: record):");
-        List<TableRow> scanned = storage.scanTableWithRids("students");
-        scanned.forEach(tr -> System.out.println(tr.rid().offset() + ": " + tr.record()));
-        check(scanned.size() == seed.size(), "Scan count should equal inserted count");
+        // Full heap scan
+        System.out.println("Full heap scan (pageId,slotId: record):");
+        List<Record> all = new ArrayList<>();
+        storage.scan("students", (rid, rec) -> {
+            System.out.println("(" + rid.pageId() + "," + rid.slotId() + ") : " + rec);
+            all.add(rec);
+        });
+        check(all.size() == seed.size(), "Scan count should equal inserted count");
 
         // Build index
         index.createIndex("students_id_idx", "students", "id");
@@ -73,8 +75,7 @@ public class Main {
         check(eq.size() == 2, "Expected 2 records for id=2");
 
         // Cross-check index result matches filtered scan
-        List<Record> scanFiltered = scanned.stream()
-            .map(TableRow::record)
+        List<Record> scanFiltered = all.stream()
             .filter(r -> (int) r.getValues().get(0) == 2)
             .collect(Collectors.toList());
         check(equalsIgnoreOrder(eq, scanFiltered), "Index lookup mismatch vs scan filter for id=2");
@@ -85,17 +86,17 @@ public class Main {
         rng.forEach(System.out::println);
         check(rng.size() == 3, "Expected 3 records in range [2,3]");
 
-        // Demonstrate random single-record fetch by RID
-        RID sampleRid = rids.get(2); // third inserted
-        Record sampleRec = storage.readRecordByRid("students", sampleRid);
-        System.out.println("\nRandom access via RID " + sampleRid.offset() + ": " + sampleRec);
-        check(sampleRec.getValues().get(1).equals("Bobby"), "RID random access did not fetch expected record");
+        // Demonstrate random single-record fetch by PageRID
+        PageRID sampleRid = pageRids.get(2); // third inserted
+        Record sampleRec = storage.read("students", sampleRid);
+        System.out.println("\nRandom access via PageRID (" + sampleRid.pageId() + "," + sampleRid.slotId() + "): " + sampleRec);
+        check(sampleRec.getValues().get(1).equals("Bobby"), "PageRID random access did not fetch expected record");
 
         // VARCHAR length constraint test (expect failure)
         System.out.println("\nAttempting to insert overly long name (should fail):");
         try {
             String longName = "x".repeat(60); // > 50 bytes
-            storage.insertRecordWithRid("students", new Record(List.of(5, longName, true)));
+            storage.insert("students", new Record(List.of(5, longName, true)));
             throw new IllegalStateException("Length constraint not enforced for VARCHAR");
         } catch (IllegalArgumentException ex) {
             System.out.println("Caught expected exception: " + ex.getMessage());

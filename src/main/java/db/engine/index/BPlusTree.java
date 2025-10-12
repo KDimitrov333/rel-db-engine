@@ -3,6 +3,7 @@ package db.engine.index;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import db.engine.storage.PageRID;
 
 public class BPlusTree {
     private final int order;              // max children per internal node
@@ -25,10 +26,10 @@ public class BPlusTree {
         return order;
     }
 
-    // Search for key - return immutable list of RID offsets (may be empty)
-    public List<Long> search(int key) { return searchRecursive(root, key); }
+    // Search for key - return immutable list of PageRIDs (may be empty)
+    public List<PageRID> search(int key) { return searchRecursive(root, key); }
 
-    private List<Long> searchRecursive(Node node, int key) {
+    private List<PageRID> searchRecursive(Node node, int key) {
         if (node.isLeaf) {
             int pos = lowerBound(node.keys, key); // first >= key
             if (pos < node.keys.size() && node.keys.get(pos) == key) {
@@ -68,8 +69,8 @@ public class BPlusTree {
      * Range search: returns all record ids whose key is in [lowInclusive, highInclusive].
      * Keys returned preserve ascending key order; duplicate key record ids preserve insertion order.
      */
-    public List<Long> rangeSearch(int lowInclusive, int highInclusive) {
-        List<Long> result = new ArrayList<>();
+    public List<PageRID> rangeSearch(int lowInclusive, int highInclusive) {
+        List<PageRID> result = new ArrayList<>();
         if (lowInclusive > highInclusive) return result;
         Node leaf = findLeaf(lowInclusive);
         if (leaf == null) return result;
@@ -98,8 +99,8 @@ public class BPlusTree {
     }
 
     
-    // Insert (key, RID offset)
-    public void insert(int key, long ridOffset) {
+    // Insert (key, PageRID)
+    public void insert(int key, PageRID rid) {
         Node r = root;
         if (r.keys.size() == maxKeys) {
             // root is full, split
@@ -108,13 +109,13 @@ public class BPlusTree {
             splitChild(newRoot, 0, r);
             root = newRoot;
         }
-        insertNonFull(root, key, ridOffset);
+        insertNonFull(root, key, rid);
     }
 
     // Insert into non-full node
-    private void insertNonFull(Node node, int key, long ridOffset) {
+    private void insertNonFull(Node node, int key, PageRID rid) {
         if (node.isLeaf) {
-            leafInsert(node, key, ridOffset);
+            leafInsert(node, key, rid);
         } else {
             int pos = upperBound(node.keys, key);
 
@@ -125,19 +126,19 @@ public class BPlusTree {
                     pos++;
                 }
             }
-            insertNonFull(node.children.get(pos), key, ridOffset);
+            insertNonFull(node.children.get(pos), key, rid);
         }
     }
 
     // Insert into a leaf node at correct sorted position (or append to existing key's RID list)
-    private void leafInsert(Node leaf, int key, long ridOffset) {
+    private void leafInsert(Node leaf, int key, PageRID rid) {
         int pos = lowerBound(leaf.keys, key);
         if (pos < leaf.keys.size() && leaf.keys.get(pos) == key) {
-            leaf.values.get(pos).add(ridOffset);
+            leaf.values.get(pos).add(rid);
         } else {
             leaf.keys.add(pos, key);
-            List<Long> list = new ArrayList<>();
-            list.add(ridOffset);
+            List<PageRID> list = new ArrayList<>();
+            list.add(rid);
             leaf.values.add(pos, list);
         }
     }
@@ -162,7 +163,7 @@ public class BPlusTree {
 
         // Move rightSize entries from end of leaf to sibling (preserve order)
         List<Integer> moveKeys = new ArrayList<>(rightSize);
-        List<List<Long>> moveVals = new ArrayList<>(rightSize);
+        List<List<PageRID>> moveVals = new ArrayList<>(rightSize);
         for (int i = total - rightSize; i < total; i++) {
             moveKeys.add(leaf.keys.get(i));
             moveVals.add(leaf.values.get(i));
@@ -210,7 +211,7 @@ public class BPlusTree {
         final boolean isLeaf;
         final List<Integer> keys;
         final List<Node> children;        // internal nodes only (null for leaves)
-        final List<List<Long>> values;    // leaf nodes only (null for internals)
+    final List<List<PageRID>> values;    // leaf nodes only (null for internals)
         Node next;                        // link leaf nodes (mutable linkage)
 
         Node(boolean isLeaf) {
