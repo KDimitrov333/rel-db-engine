@@ -39,12 +39,12 @@ public class IndexManager {
 
     // Build in-memory B+ tree using RIDs via storage heap scan
         BPlusTree tree = new BPlusTree(4);
-        storage.scan(tableName, (pageRid, rec) -> {
+        storage.scan(tableName, (rid, rec) -> {
             Object v = rec.getValues().get(colIndex);
             if (!(v instanceof Integer)) {
                 throw new IllegalStateException("Indexed column expected INT but found: " + (v == null ? "null" : v.getClass().getSimpleName()));
             }
-            tree.insert((Integer) v, pageRid);
+            tree.insert((Integer) v, rid);
         });
 
         indexStates.put(indexName, new IndexState(indexName, tableName, columnName, colIndex, tree));

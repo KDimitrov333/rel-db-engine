@@ -99,7 +99,7 @@ public class BPlusTree {
     }
 
     
-    // Insert (key, PageRID)
+    // Insert (key, RID)
     public void insert(int key, RID rid) {
         Node r = root;
         if (r.keys.size() == maxKeys) {

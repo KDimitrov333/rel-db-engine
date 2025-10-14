@@ -58,7 +58,7 @@ public class StorageManager {
     }
 
     /**
-     * Delete (tombstone) a record identified by PageRID. Returns true if a record existed and
+     * Delete (tombstone) a record identified by RID. Returns true if a record existed and
      * was marked deleted; false if slot was already tombstoned or out of range.
      */
     public boolean delete(String tableName, RID rid) {
