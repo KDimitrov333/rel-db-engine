@@ -6,7 +6,7 @@ import db.engine.catalog.DataType;
 import db.engine.catalog.TableSchema;
 import db.engine.index.IndexManager;
 import db.engine.storage.Record;
-import db.engine.storage.PageRID;
+import db.engine.storage.RID;
 import db.engine.storage.StorageManager;
 
 import java.io.File;
@@ -48,10 +48,10 @@ public class Main {
             new Record(List.of(4, "Dave", false))
         );
 
-        List<PageRID> pageRids = new ArrayList<>();
+    List<RID> rids = new ArrayList<>();
         for (Record r : seed) {
-            PageRID rid = storage.insert("students", r);
-            pageRids.add(rid);
+            RID rid = storage.insert("students", r);
+            rids.add(rid);
         }
         System.out.println("Inserted " + seed.size() + " rows (with duplicate id=2)\n");
 
@@ -86,11 +86,11 @@ public class Main {
         rng.forEach(System.out::println);
         check(rng.size() == 3, "Expected 3 records in range [2,3]");
 
-        // Demonstrate random single-record fetch by PageRID
-        PageRID sampleRid = pageRids.get(2); // third inserted
+    // Demonstrate random single-record fetch by RID
+    RID sampleRid = rids.get(2); // third inserted
         Record sampleRec = storage.read("students", sampleRid);
-        System.out.println("\nRandom access via PageRID (" + sampleRid.pageId() + "," + sampleRid.slotId() + "): " + sampleRec);
-        check(sampleRec.getValues().get(1).equals("Bobby"), "PageRID random access did not fetch expected record");
+    System.out.println("\nRandom access via RID (" + sampleRid.pageId() + "," + sampleRid.slotId() + "): " + sampleRec);
+    check(sampleRec.getValues().get(1).equals("Bobby"), "RID random access did not fetch expected record");
 
         // VARCHAR length constraint test (expect failure)
         System.out.println("\nAttempting to insert overly long name (should fail):");

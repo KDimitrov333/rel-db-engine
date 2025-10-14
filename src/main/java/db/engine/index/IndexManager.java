@@ -6,7 +6,7 @@ import db.engine.catalog.TableSchema;
 import db.engine.catalog.ColumnSchema;
 import db.engine.catalog.DataType;
 import db.engine.storage.StorageManager;
-import db.engine.storage.PageRID;
+import db.engine.storage.RID;
 import db.engine.storage.Record;
 
 import java.io.File;
@@ -37,7 +37,7 @@ public class IndexManager {
             throw new IllegalArgumentException("Indexing only supported on INT columns");
         }
 
-        // Build in-memory B+ tree using PageRIDs via storage heap scan
+    // Build in-memory B+ tree using RIDs via storage heap scan
         BPlusTree tree = new BPlusTree(4);
         storage.scan(tableName, (pageRid, rec) -> {
             Object v = rec.getValues().get(colIndex);
@@ -71,7 +71,7 @@ public class IndexManager {
         String table = (iSchema != null) ? iSchema.table() : state.tableName;
         var rids = state.tree.search(key);
         List<Record> out = new ArrayList<>(rids.size());
-        for (PageRID rid : rids) {
+    for (RID rid : rids) {
             out.add(storage.read(table, rid));
         }
         return out;
@@ -90,14 +90,14 @@ public class IndexManager {
         String table = (iSchema != null) ? iSchema.table() : state.tableName;
         var rids = state.tree.rangeSearch(lowInclusive, highInclusive);
         List<Record> out = new ArrayList<>(rids.size());
-        for (PageRID rid : rids) {
+    for (RID rid : rids) {
             out.add(storage.read(table, rid));
         }
         return out;
     }
 
     // To be called by StorageManager after a successful insert
-    public void onTableInsert(String tableName, PageRID rid, Record newRecord) {
+    public void onTableInsert(String tableName, RID rid, Record newRecord) {
         for (IndexState state : indexStates.values()) {
             if (!state.tableName.equals(tableName)) continue;
             Object val = newRecord.getValues().get(state.columnIndex);
@@ -109,7 +109,7 @@ public class IndexManager {
     }
 
     // To be called by StorageManager after a deletion; oldRecord supplies the key for removal.
-    public void onTableDelete(String tableName, PageRID rid, Record oldRecord) {
+    public void onTableDelete(String tableName, RID rid, Record oldRecord) {
         if (oldRecord == null) return; // safety
         for (IndexState state : indexStates.values()) {
             if (!state.tableName.equals(tableName)) continue;

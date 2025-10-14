@@ -41,9 +41,9 @@ public class StorageManager {
         }
     }
 
-    public PageRID insert(String tableName, Record record) { return doHeapInsert(tableName, record); }
+    public RID insert(String tableName, Record record) { return doHeapInsert(tableName, record); }
 
-    public Record read(String tableName, PageRID rid) {
+    public Record read(String tableName, RID rid) {
         TableSchema ts = catalog.getTableSchema(tableName);
         if (ts == null) throw new IllegalArgumentException("Table not found: " + tableName);
         List<ColumnSchema> cols = ts.columns();
@@ -61,7 +61,7 @@ public class StorageManager {
      * Delete (tombstone) a record identified by PageRID. Returns true if a record existed and
      * was marked deleted; false if slot was already tombstoned or out of range.
      */
-    public boolean delete(String tableName, PageRID rid) {
+    public boolean delete(String tableName, RID rid) {
         TableSchema ts = catalog.getTableSchema(tableName);
         if (ts == null) throw new IllegalArgumentException("Table not found: " + tableName);
         List<ColumnSchema> cols = ts.columns();
@@ -93,7 +93,7 @@ public class StorageManager {
     }
 
     // Functional-style scan using callback to avoid building large lists when not needed
-    public interface RowConsumer { void accept(PageRID rid, Record record); }
+    public interface RowConsumer { void accept(RID rid, Record record); }
 
     public void scan(String tableName, RowConsumer consumer) {
         TableSchema ts = catalog.getTableSchema(tableName);
@@ -108,7 +108,7 @@ public class StorageManager {
             try { bytes = bufferManager.getPage(ts.filePath(), pid).data(); } catch (IOException e) { throw new RuntimeException(e); }
             HeapPage hp = HeapPage.wrap(ts.filePath(), pid, bytes, PAGE_SIZE);
             for (int slotId : hp.liveSlotIds()) {
-                consumer.accept(new PageRID(pid, slotId), hp.readRecord(slotId, cols));
+                consumer.accept(new RID(pid, slotId), hp.readRecord(slotId, cols));
             }
         }
     }
@@ -159,7 +159,7 @@ public class StorageManager {
         return new IllegalArgumentException("Type mismatch for column '" + col.name() + "' expected " + col.type() + ", got " + (v == null ? "null" : v.getClass().getSimpleName()));
     }
 
-    private PageRID doHeapInsert(String tableName, Record record) {
+    private RID doHeapInsert(String tableName, Record record) {
         TableSchema tSchema = catalog.getTableSchema(tableName);
         if (tSchema == null) throw new IllegalArgumentException("Table not found: " + tableName);
         List<ColumnSchema> columns = tSchema.columns();
@@ -208,7 +208,7 @@ public class StorageManager {
         }
         bufferManager.invalidate(file.getPath(), targetPageId);
 
-        PageRID rid = new PageRID(targetPageId, slotId);
+    RID rid = new RID(targetPageId, slotId);
         if (indexManager != null) {
             indexManager.onTableInsert(tableName, rid, record);
         }
