@@ -112,6 +112,40 @@ public class BPlusTree {
         insertNonFull(root, key, rid);
     }
 
+    /**
+     * Delete one (key,rid) pair.
+     * No rebalancing or separator key fixes; key removed if last rid list entry;
+     * root may shrink only in trivial cases. Returns true if removed, false otherwise.
+     */
+     public boolean delete(int key, PageRID rid) {
+         // Descend to leaf
+         List<Node> path = new ArrayList<>();
+         Node current = root;
+         while (!current.isLeaf) {
+             path.add(current);
+             int childIndex = upperBound(current.keys, key);
+             current = current.children.get(childIndex);
+         }
+         int pos = lowerBound(current.keys, key);
+         if (pos >= current.keys.size() || current.keys.get(pos) != key) {
+             return false; // key not found
+         }
+         List<PageRID> rids = current.values.get(pos);
+         boolean removed = rids.remove(rid);
+         if (!removed) return false; // rid not present
+         if (rids.isEmpty()) {
+             current.keys.remove(pos);
+             current.values.remove(pos);
+             // Root shrink (will decide if necessary later)
+             if (root != current && root.keys.isEmpty() && !root.isLeaf && root.children.size() == 1) {
+                 root = root.children.get(0);
+             } else if (root == current && root.keys.isEmpty() && root.isLeaf) {
+                 // all entries removed -> empty tree
+             }
+         }
+         return true;
+     }
+
     // Insert into non-full node
     private void insertNonFull(Node node, int key, PageRID rid) {
         if (node.isLeaf) {

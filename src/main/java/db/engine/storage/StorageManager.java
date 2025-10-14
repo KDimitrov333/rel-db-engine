@@ -57,6 +57,41 @@ public class StorageManager {
         return hp.readRecord(rid.slotId(), cols);
     }
 
+    /**
+     * Delete (tombstone) a record identified by PageRID. Returns true if a record existed and
+     * was marked deleted; false if slot was already tombstoned or out of range.
+     */
+    public boolean delete(String tableName, PageRID rid) {
+        TableSchema ts = catalog.getTableSchema(tableName);
+        if (ts == null) throw new IllegalArgumentException("Table not found: " + tableName);
+        List<ColumnSchema> cols = ts.columns();
+        byte[] pageBytes;
+        try {
+            pageBytes = bufferManager.getPage(ts.filePath(), rid.pageId()).data();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        HeapPage hp = HeapPage.wrap(ts.filePath(), rid.pageId(), pageBytes, PAGE_SIZE);
+        // Try to read old record (will throw if tombstoned)
+        Record old;
+        try {
+            old = hp.readRecord(rid.slotId(), cols);
+        } catch (Exception ex) { return false; }
+        hp.delete(rid.slotId());
+        // Persist page after mutation
+        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(new File(ts.filePath()), "rw")) {
+            raf.seek((long) rid.pageId() * PAGE_SIZE);
+            raf.write(hp.rawData());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed writing heap page on delete " + rid.pageId(), e);
+        }
+        bufferManager.invalidate(ts.filePath(), rid.pageId());
+        if (indexManager != null) {
+            indexManager.onTableDelete(tableName, rid, old);
+        }
+        return true;
+    }
+
     // Functional-style scan using callback to avoid building large lists when not needed
     public interface RowConsumer { void accept(PageRID rid, Record record); }
 

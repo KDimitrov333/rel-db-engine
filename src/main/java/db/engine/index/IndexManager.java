@@ -108,6 +108,18 @@ public class IndexManager {
         }
     }
 
+    // To be called by StorageManager after a deletion; oldRecord supplies the key for removal.
+    public void onTableDelete(String tableName, PageRID rid, Record oldRecord) {
+        if (oldRecord == null) return; // safety
+        for (IndexState state : indexStates.values()) {
+            if (!state.tableName.equals(tableName)) continue;
+            Object val = oldRecord.getValues().get(state.columnIndex);
+            if (val instanceof Integer iv) {
+                state.tree.delete(iv, rid);
+            }
+        }
+    }
+
     // Helper: find column index by name, returns -1 if not found.
     private int findColumnIndex(List<ColumnSchema> cols, String name) {
         for (int i = 0; i < cols.size(); i++) {
