@@ -52,6 +52,13 @@ public class CatalogManager {
         return indexes.get(name);
     }
 
+    /**
+     * Expose all registered index schemas. Returned map should be treated as read-only by callers.
+     */
+    public Map<String, IndexSchema> allIndexSchemas() {
+        return java.util.Collections.unmodifiableMap(indexes);
+    }
+
     private void loadCatalog() {
         loadInto(tablesFile, new TypeToken<Map<String, TableSchema>>(){}.getType(), tables);
         loadInto(indexesFile, new TypeToken<Map<String, IndexSchema>>(){}.getType(), indexes);
