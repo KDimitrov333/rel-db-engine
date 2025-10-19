@@ -28,6 +28,9 @@ public class StorageManager {
         this.indexManager = indexManager;
     }
 
+    public CatalogManager getCatalog() { return catalog; }
+    public BufferManager getBufferManager() { return bufferManager; }
+
     public void createTable(TableSchema schema) {
         catalog.registerTable(schema);
 
