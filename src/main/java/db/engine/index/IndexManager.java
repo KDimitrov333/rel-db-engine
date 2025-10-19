@@ -78,6 +78,15 @@ public class IndexManager {
     }
 
     /**
+     * Direct RID lookup (equality). Returns immutable list of matching RIDs.
+     */
+    public List<RID> searchRids(String indexName, int key) {
+        IndexState state = indexStates.get(indexName);
+        if (state == null) throw new IllegalArgumentException("Index not found: " + indexName);
+        return state.tree.search(key); // search already returns immutable copy
+    }
+
+    /**
      * Range lookup using an index. Returns all records whose indexed key is in [lowInclusive, highInclusive].
      * If the range is empty (low > high) an empty list is returned.
      */
@@ -94,6 +103,23 @@ public class IndexManager {
             out.add(storage.read(table, rid));
         }
         return out;
+    }
+
+    /**
+     * Direct RID range lookup. Returns immutable snapshot of matching RIDs.
+     */
+    public List<RID> rangeSearchRids(String indexName, int lowInclusive, int highInclusive) {
+        if (lowInclusive > highInclusive) return List.of();
+        IndexState state = indexStates.get(indexName);
+        if (state == null) throw new IllegalArgumentException("Index not found: " + indexName);
+        return List.copyOf(state.tree.rangeSearch(lowInclusive, highInclusive));
+    }
+
+    /** Resolve table name associated with an index. */
+    public String getTableForIndex(String indexName) {
+        IndexState state = indexStates.get(indexName);
+        if (state == null) throw new IllegalArgumentException("Index not found: " + indexName);
+        return state.tableName;
     }
 
     // To be called by StorageManager after a successful insert
