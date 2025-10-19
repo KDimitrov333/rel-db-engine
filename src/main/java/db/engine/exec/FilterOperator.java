@@ -17,8 +17,8 @@ public class FilterOperator implements Operator {
     public void open() { child.open(); }
 
     @Override
-    public Tuple next() {
-        Tuple t;
+    public Row next() {
+        Row t;
         while ((t = child.next()) != null) {
             if (predicate.test(t)) return t;
         }

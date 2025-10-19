@@ -36,8 +36,8 @@ public class ComparisonPredicate implements Predicate {
     }
 
     @Override
-    public boolean test(Tuple tuple) {
-        int v = (Integer) tuple.values().get(columnIndex);
+    public boolean test(Row row) {
+        int v = (Integer) row.values().get(columnIndex);
         return switch (op) {
             case EQ -> v == value;
             case LT -> v < value;

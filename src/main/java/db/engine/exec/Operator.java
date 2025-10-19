@@ -5,6 +5,6 @@ package db.engine.exec;
  */
 public interface Operator {
     void open();
-    Tuple next(); // returns next tuple or null when exhausted
+    Row next(); // returns next row or null when exhausted
     void close();
 }

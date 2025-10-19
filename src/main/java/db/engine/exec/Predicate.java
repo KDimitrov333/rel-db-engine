@@ -1,8 +1,8 @@
 package db.engine.exec;
 
 /**
- * Minimal predicate interface evaluated against a Tuple.
+ * Minimal predicate interface evaluated against a Row.
  */
 public interface Predicate {
-    boolean test(Tuple tuple);
+    boolean test(Row row);
 }

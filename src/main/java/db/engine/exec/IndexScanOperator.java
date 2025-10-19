@@ -6,6 +6,8 @@ import java.util.List;
 import db.engine.index.IndexManager;
 import db.engine.storage.RID;
 import db.engine.storage.Record;
+import db.engine.catalog.ColumnSchema;
+import db.engine.catalog.TableSchema;
 import db.engine.storage.StorageManager;
 
 /**
@@ -23,6 +25,7 @@ public class IndexScanOperator implements Operator {
     private List<RID> rids;
     private Iterator<RID> iter;
     private String tableName;
+    private List<ColumnSchema> schema; // table schema for tuples
     private boolean opened;
 
     // Equality constructor
@@ -48,7 +51,11 @@ public class IndexScanOperator implements Operator {
     @Override
     public void open() {
         if (opened) return;
+        // Validate index existence early
         this.tableName = indexManager.getTableForIndex(indexName);
+        // Acquire schema metadata for projection propagation
+        TableSchema ts = storage.getCatalog().getTableSchema(tableName);
+        this.schema = (ts != null) ? ts.columns() : null;
         if (equalityKey != null) {
             rids = indexManager.searchRids(indexName, equalityKey);
         } else if (rangeLow != null && rangeHigh != null) {
@@ -61,18 +68,19 @@ public class IndexScanOperator implements Operator {
     }
 
     @Override
-    public Tuple next() {
+    public Row next() {
         if (!opened || iter == null) return null;
         if (!iter.hasNext()) return null;
         RID rid = iter.next();
         Record rec = storage.read(tableName, rid);
-        return new Tuple(rec, rid);
+        return Row.of(rec, rid, schema);
     }
 
     @Override
     public void close() {
         rids = null;
         iter = null;
+        schema = null;
         opened = false;
     }
 }

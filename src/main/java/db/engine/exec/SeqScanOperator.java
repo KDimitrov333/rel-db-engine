@@ -49,7 +49,7 @@ public class SeqScanOperator implements Operator {
     }
 
     @Override
-    public Tuple next() {
+    public Row next() {
         if (!opened) return null;
         while (true) {
             if (currentSlotIter == null || !currentSlotIter.hasNext()) {
@@ -59,7 +59,7 @@ public class SeqScanOperator implements Operator {
             if (currentSlotIter != null && currentSlotIter.hasNext()) {
                 int slotId = currentSlotIter.next();
                 Record rec = currentHeapPage.readRecord(slotId, columns);
-                return new Tuple(rec, new RID(currentHeapPage.pageId(), slotId));
+                return Row.of(rec, new RID(currentHeapPage.pageId(), slotId), columns);
             }
         }
     }
