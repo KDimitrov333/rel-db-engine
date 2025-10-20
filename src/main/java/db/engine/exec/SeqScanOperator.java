@@ -83,4 +83,7 @@ public class SeqScanOperator implements Operator {
         columns = null;
         tableSchema = null;
     }
+    
+    @Override
+    public List<ColumnSchema> schema() { return columns; }
 }

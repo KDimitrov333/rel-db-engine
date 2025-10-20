@@ -1,8 +1,8 @@
 package db.engine.exec;
 
 /**
- * Operator that filters tuples from its child based on a Predicate.
- * Pulls tuples until one matches or child is exhausted.
+ * Operator that filters rows from its child based on a Predicate.
+ * Pulls rows until one matches or child is exhausted.
  */
 public class FilterOperator implements Operator {
     private final Operator child;
@@ -18,9 +18,9 @@ public class FilterOperator implements Operator {
 
     @Override
     public Row next() {
-        Row t;
-        while ((t = child.next()) != null) {
-            if (predicate.test(t)) return t;
+        Row r;
+        while ((r = child.next()) != null) {
+            if (predicate.test(r)) return r;
         }
         return null;
     }

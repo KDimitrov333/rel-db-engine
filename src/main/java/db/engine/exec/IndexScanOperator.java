@@ -25,7 +25,7 @@ public class IndexScanOperator implements Operator {
     private List<RID> rids;
     private Iterator<RID> iter;
     private String tableName;
-    private List<ColumnSchema> schema; // table schema for tuples
+    private List<ColumnSchema> schema; // table schema for produced rows
     private boolean opened;
 
     // Equality constructor
@@ -83,4 +83,7 @@ public class IndexScanOperator implements Operator {
         schema = null;
         opened = false;
     }
+    
+    @Override
+    public List<ColumnSchema> schema() { return schema; }
 }
