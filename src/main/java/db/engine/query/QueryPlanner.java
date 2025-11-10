@@ -45,9 +45,10 @@ public class QueryPlanner {
 
         // Decide on index usage: only INT equality supported.
         if (canUseIntEqualityIndex(query, schema)) {
-            // Acquire index name and run index scan; predicate fully satisfied.
-            String indexName = findIndexForColumn(query.tableName(), query.condition().columnName());
-            int key = (Integer) query.condition().literalValue();
+            // Acquire index name and run index scan; predicate fully satisfied by single atomic condition.
+            Condition c = query.where().conditions().get(0);
+            String indexName = findIndexForColumn(query.tableName(), c.columnName());
+            int key = (Integer) c.literalValue();
             root = new IndexScanOperator(indexManager, storage, indexName, key);
         } else {
             root = new SeqScanOperator(storage, query.tableName());
@@ -75,8 +76,10 @@ public class QueryPlanner {
     }
 
     private boolean canUseIntEqualityIndex(SelectQuery query, List<ColumnSchema> schema) {
-        if (query.condition() == null || indexManager == null) return false;
-        Condition c = query.condition();
+        if (query.where() == null || indexManager == null) return false;
+        WhereClause w = query.where();
+        if (!w.isSingle()) return false; // only single atomic condition eligible
+        Condition c = w.conditions().get(0);
         if (c.op() != Condition.Op.EQ) return false;
         // Find column & type
         for (ColumnSchema col : schema) {

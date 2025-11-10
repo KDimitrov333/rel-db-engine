@@ -14,16 +14,13 @@ import java.util.regex.Pattern;
  */
 public class QueryParser {
     private static final Pattern SELECT_PATTERN = Pattern.compile(
-        // Pattern breakdown:
-        //  SELECT\s+(.+)           -> group(1): column list or '*'
-        //  FROM\s+([a-zA-Z_][a-zA-Z0-9_]*) -> group(2): table name (simple identifier)
-        //  (?:\s+WHERE\s+([a-zA-Z_][a-zA-Z0-9_]*) -> group(3): WHERE column name
-        //      \s*(=|<=|<|>=|>)               -> group(4): operator
-        //      \s*([^;]+))?                   -> group(5): literal (up to semicolon or end)
-        //  ;?$                                -> optional trailing semicolon
-        // Entire WHERE clause is optional (non-capturing group with '?').
+        // Pattern breakdown base portion (WHERE part captured as full tail for custom parsing):
+        //  SELECT\s+(.+)            -> group(1): column list or '*'
+        //  FROM\s+([identifier])    -> group(2): table name
+        //  (?:\s+WHERE\s+(.+))?    -> group(3): full WHERE tail (we parse manually for AND/OR)
+        //  ;?$                      -> optional semicolon
         "^SELECT\\s+(.+)\\s+FROM\\s+([a-zA-Z_][a-zA-Z0-9_]*)" +
-        "(?:\\s+WHERE\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(=|<=|<|>=|>)\\s*([^;]+))?;?$",
+        "(?:\\s+WHERE\\s+(.+))?;?$",
         Pattern.CASE_INSENSITIVE
     );
 
@@ -36,9 +33,7 @@ public class QueryParser {
         }
         String colsPart = m.group(1).trim();
         String tableName = m.group(2).trim();
-        String whereCol = m.group(3);
-        String whereOp = m.group(4);
-        String whereLit = m.group(5);
+        String whereTail = m.group(3);
 
         List<String> columns = new ArrayList<>();
         if (!colsPart.equals("*")) {
@@ -49,13 +44,11 @@ public class QueryParser {
             }
         }
 
-        Condition condition = null;
-        if (whereCol != null) {
-            Condition.Op op = mapOp(whereOp);
-            Object lit = parseLiteral(whereLit.trim());
-            condition = new Condition(whereCol.trim(), op, lit);
+        WhereClause where = null;
+        if (whereTail != null) {
+            where = parseWhere(whereTail.trim());
         }
-        return new SelectQuery(tableName, columns, condition);
+        return new SelectQuery(tableName, columns, where);
     }
 
     private Condition.Op mapOp(String op) {
@@ -82,5 +75,32 @@ public class QueryParser {
             }
         }
         throw new IllegalArgumentException("Unsupported literal: " + raw);
+    }
+
+    // Parse simple AND/OR chain without parentheses.
+    private WhereClause parseWhere(String raw) {
+        String[] tokens = raw.split("\\s+");
+        List<Condition> conditions = new ArrayList<>();
+        List<String> connectors = new ArrayList<>();
+        int i = 0;
+        while (i < tokens.length) {
+            if (i + 2 >= tokens.length) throw new IllegalArgumentException("Incomplete comparison near token: " + tokens[i]);
+            String col = tokens[i];
+            String opTok = tokens[i+1];
+            String litTok = tokens[i+2];
+            Condition.Op op = mapOp(opTok);
+            Object lit = parseLiteral(litTok);
+            conditions.add(new Condition(col, op, lit));
+            i += 3;
+            if (i < tokens.length) {
+                String connector = tokens[i].toUpperCase();
+                if (!connector.equals("AND") && !connector.equals("OR")) {
+                    throw new IllegalArgumentException("Unexpected token (expected AND/OR): " + tokens[i]);
+                }
+                connectors.add(connector);
+                i++;
+            }
+        }
+        return new WhereClause(conditions, connectors);
     }
 }
