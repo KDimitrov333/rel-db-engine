@@ -43,9 +43,11 @@ public class QueryPlanner {
         Operator root;
         Predicate pred = null;
 
-        // Decide on index usage: only INT equality supported.
-        if (canUseIntEqualityIndex(query, schema)) {
-            // Acquire index name and run index scan; predicate fully satisfied by single atomic condition.
+        // Index usage decision: attempt range first, then equality, else fallback scan.
+        RangePlan rangePlan = tryRangeIndex(query, schema);
+        if (rangePlan != null) {
+            root = IndexScanOperator.range(indexManager, storage, rangePlan.indexName, rangePlan.low, rangePlan.high);
+        } else if (canUseIntEqualityIndex(query, schema)) {
             Condition c = query.where().conditions().get(0);
             String indexName = findIndexForColumn(query.tableName(), c.columnName());
             int key = (Integer) c.literalValue();
@@ -53,9 +55,7 @@ public class QueryPlanner {
         } else {
             root = new SeqScanOperator(storage, query.tableName());
             pred = predicateCompiler.compile(query, schema); // may be null
-            if (pred != null) {
-                root = new FilterOperator(root, pred);
-            }
+            if (pred != null) root = new FilterOperator(root, pred);
         }
 
         List<String> cols = query.columns();
@@ -100,5 +100,49 @@ public class QueryPlanner {
             if (idx.table().equals(tableName) && idx.column().equals(columnName)) return idx.name();
         }
         return null;
+    }
+
+    // Attempt a range index usage from multiple AND-only comparisons on same INT indexed column.
+    private RangePlan tryRangeIndex(SelectQuery query, List<ColumnSchema> schema) {
+        if (query.where() == null || indexManager == null) return null;
+        WhereClause w = query.where();
+        if (w.conditions().size() < 2) return null;
+        // All connectors must be AND.
+        for (String conn : w.connectors()) if (!conn.equals("AND")) return null;
+        String candidateCol = null;
+        Integer low = null; Integer high = null;
+        for (Condition c : w.conditions()) {
+            if (c.negated()) return null; // skip NOT complexity
+            if (!(c.literalValue() instanceof Integer)) return null;
+            ColumnSchema colSchema = schema.stream().filter(cs -> cs.name().equals(c.columnName())).findFirst().orElse(null);
+            if (colSchema == null || colSchema.type() != db.engine.catalog.DataType.INT) return null;
+            String colName = colSchema.name();
+            if (candidateCol == null) candidateCol = colName; else if (!candidateCol.equals(colName)) return null;
+            int val = (Integer) c.literalValue();
+            switch (c.op()) {
+                case GT -> low = (low == null) ? val + 1 : Math.max(low, val + 1);
+                case GTE -> low = (low == null) ? val : Math.max(low, val);
+                case LT -> high = (high == null) ? val - 1 : Math.min(high, val - 1);
+                case LTE -> high = (high == null) ? val : Math.min(high, val);
+                case EQ -> {
+                    low = (low == null) ? val : Math.max(low, val);
+                    high = (high == null) ? val : Math.min(high, val);
+                }
+            }
+        }
+        if (candidateCol == null) return null;
+        String indexName = findIndexForColumn(query.tableName(), candidateCol);
+        if (indexName == null) return null;
+        if (low != null && high != null && low.equals(high)) return null; // equality path covers this
+        if (low == null && high == null) return null;
+        if (low == null) low = Integer.MIN_VALUE;
+        if (high == null) high = Integer.MAX_VALUE;
+        if (low > high) return new RangePlan(indexName, 1, 0); // empty range
+        return new RangePlan(indexName, low, high);
+    }
+
+    private static final class RangePlan {
+        final String indexName; final int low; final int high;
+        RangePlan(String indexName, int low, int high) { this.indexName = indexName; this.low = low; this.high = high; }
     }
 }
