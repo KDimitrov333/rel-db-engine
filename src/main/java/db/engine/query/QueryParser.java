@@ -84,13 +84,19 @@ public class QueryParser {
         List<String> connectors = new ArrayList<>();
         int i = 0;
         while (i < tokens.length) {
+            boolean negated = false;
+            if (tokens[i].equalsIgnoreCase("NOT")) {
+                negated = true;
+                i++;
+                if (i >= tokens.length) throw new IllegalArgumentException("NOT without following comparison");
+            }
             if (i + 2 >= tokens.length) throw new IllegalArgumentException("Incomplete comparison near token: " + tokens[i]);
             String col = tokens[i];
             String opTok = tokens[i+1];
             String litTok = tokens[i+2];
             Condition.Op op = mapOp(opTok);
             Object lit = parseLiteral(litTok);
-            conditions.add(new Condition(col, op, lit));
+            conditions.add(new Condition(col, op, lit, negated));
             i += 3;
             if (i < tokens.length) {
                 String connector = tokens[i].toUpperCase();

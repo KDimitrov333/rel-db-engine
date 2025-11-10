@@ -59,22 +59,23 @@ public class PredicateCompiler {
         if (colIndex == -1) throw new IllegalArgumentException("Predicate column not found: " + cond.columnName());
         Object lit = cond.literalValue();
         DataType type = colSchema.type();
-        switch (type) {
+        Predicate base = switch (type) {
             case INT -> {
                 if (!(lit instanceof Integer iv)) {
                     throw new IllegalArgumentException("Expected INT literal for column '" + colSchema.name() + "' but got " + (lit == null ? "null" : lit.getClass().getSimpleName()));
                 }
                 ComparisonPredicate.Op mapped = mapOp(cond.op());
-                return new ComparisonPredicate(colIndex, mapped, iv);
+                yield new ComparisonPredicate(colIndex, mapped, iv);
             }
             case BOOLEAN, VARCHAR -> {
                 if (cond.op() != Condition.Op.EQ) {
                     throw new IllegalArgumentException("Only EQ supported for non-INT column '" + colSchema.name() + "'");
                 }
-                return EqualityPredicate.forColumnName(schema, colSchema.name(), lit);
+                yield EqualityPredicate.forColumnName(schema, colSchema.name(), lit);
             }
             default -> throw new IllegalStateException("Unsupported type: " + type);
-        }
+        };
+        return cond.negated() ? CompoundPredicate.not(base) : base;
     }
 
     private ComparisonPredicate.Op mapOp(Condition.Op op) {
