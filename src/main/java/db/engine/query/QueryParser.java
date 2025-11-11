@@ -109,4 +109,50 @@ public class QueryParser {
         }
         return new WhereClause(conditions, connectors);
     }
+
+    // INSERT INTO tableName (col1, col2, ...) VALUES (val1, val2, ...);
+    private static final Pattern INSERT_PATTERN = Pattern.compile(
+        "^INSERT\\s+INTO\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(([^)]+)\\)\\s+VALUES\\s*\\(([^)]+)\\)\\s*;?$",
+        Pattern.CASE_INSENSITIVE);
+
+    public InsertQuery parseInsert(String sql) {
+        if (sql == null) throw new IllegalArgumentException("sql must not be null");
+        String trimmed = sql.trim();
+        Matcher m = INSERT_PATTERN.matcher(trimmed);
+        if (!m.matches()) throw new IllegalArgumentException("Malformed INSERT: " + sql);
+        String table = m.group(1).trim();
+        String colsPart = m.group(2).trim();
+        String valsPart = m.group(3).trim();
+        List<String> cols = new ArrayList<>();
+        for (String c : colsPart.split(",")) {
+            String col = c.trim(); if (col.isEmpty()) throw new IllegalArgumentException("Empty column name in INSERT");
+            cols.add(col);
+        }
+        List<Object> vals = new ArrayList<>();
+        for (String vRaw : splitValues(valsPart)) {
+            vals.add(parseLiteral(vRaw.trim()));
+        }
+        if (cols.size() != vals.size()) throw new IllegalArgumentException("Columns count " + cols.size() + " != values count " + vals.size());
+        return new InsertQuery(table, cols, vals);
+    }
+
+    // Split values respecting commas inside single quotes
+    private java.util.List<String> splitValues(String raw) {
+        List<String> out = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inQuote = false;
+        for (int i=0;i<raw.length();i++) {
+            char ch = raw.charAt(i);
+            if (ch == '\'') {
+                inQuote = !inQuote;
+                current.append(ch);
+            } else if (ch == ',' && !inQuote) {
+                out.add(current.toString()); current.setLength(0);
+            } else {
+                current.append(ch);
+            }
+        }
+        if (current.length() > 0) out.add(current.toString());
+        return out;
+    }
 }
