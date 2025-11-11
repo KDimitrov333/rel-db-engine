@@ -24,7 +24,7 @@ public class QueryParser {
         Pattern.CASE_INSENSITIVE
     );
 
-    public SelectQuery parse(String sql) {
+    public SelectQuery parseSelect(String sql) {
         if (sql == null) throw new IllegalArgumentException("sql must not be null");
         String trimmed = sql.trim();
         Matcher m = SELECT_PATTERN.matcher(trimmed);
@@ -115,6 +115,12 @@ public class QueryParser {
         "^INSERT\\s+INTO\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(([^)]+)\\)\\s+VALUES\\s*\\(([^)]+)\\)\\s*;?$",
         Pattern.CASE_INSENSITIVE);
 
+    // DELETE FROM tableName [WHERE <pred>];
+    private static final Pattern DELETE_BASE_PATTERN = Pattern.compile(
+        "^DELETE\\s+FROM\\s+([a-zA-Z_][a-zA-Z0-9_]*)" +
+        "(?:\\s+WHERE\\s+(.+))?;?$",
+        Pattern.CASE_INSENSITIVE);
+
     public InsertQuery parseInsert(String sql) {
         if (sql == null) throw new IllegalArgumentException("sql must not be null");
         String trimmed = sql.trim();
@@ -154,5 +160,17 @@ public class QueryParser {
         }
         if (current.length() > 0) out.add(current.toString());
         return out;
+    }
+
+    public DeleteQuery parseDelete(String sql) {
+        if (sql == null) throw new IllegalArgumentException("sql must not be null");
+        String trimmed = sql.trim();
+        Matcher m = DELETE_BASE_PATTERN.matcher(trimmed);
+        if (!m.matches()) throw new IllegalArgumentException("Malformed DELETE: " + sql);
+        String table = m.group(1).trim();
+        String whereTail = m.group(2);
+        WhereClause where = null;
+        if (whereTail != null) where = parseWhere(whereTail.trim());
+        return new DeleteQuery(table, where);
     }
 }

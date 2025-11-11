@@ -6,6 +6,7 @@ import java.util.Map;
 
 import db.engine.catalog.CatalogManager;
 import db.engine.exec.Operator;
+import db.engine.exec.Predicate;
 import db.engine.exec.Row;
 import db.engine.index.IndexManager;
 import db.engine.storage.RID;
@@ -28,13 +29,13 @@ public class QueryProcessor {
     }
 
     public Iterable<Row> stream(String sql) {
-        SelectQuery logical = parser.parse(sql);
+        SelectQuery logical = parser.parseSelect(sql);
         Operator physical = planner.plan(logical);
         return executor.stream(physical);
     }
 
     // Expose for testing/verifying parser only.
-    public SelectQuery parse(String sql) { return parser.parse(sql); }
+    public SelectQuery parseSelect(String sql) { return parser.parseSelect(sql); }
 
     /** Execute an INSERT statement and return the RID of the inserted record. */
     public RID executeInsert(String sql) {
@@ -58,5 +59,32 @@ public class QueryProcessor {
             throw new IllegalArgumentException("Missing value for column '" + schemaCols.get(i).name() + "' (no default support)");
         var rec = new Record(Arrays.asList(full));
         return storage.insert(iq.tableName(), rec);
+    }
+
+    /** Execute a DELETE statement; returns count of deleted rows. */
+    public int executeDelete(String sql) {
+        DeleteQuery dq = parser.parseDelete(sql);
+        var ts = storage.getCatalog().getTableSchema(dq.tableName());
+        if (ts == null) throw new IllegalArgumentException("Unknown table: " + dq.tableName());
+        var cols = ts.columns();
+
+        // Build row-level predicate if WHERE present
+        final Predicate rowPred;
+        if (dq.where() != null) {
+            PredicateCompiler compiler = new PredicateCompiler();
+            SelectQuery synthetic = new SelectQuery(dq.tableName(), cols.stream().map(c -> c.name()).toList(), dq.where());
+            rowPred = compiler.compile(synthetic, cols);
+        } else {
+            rowPred = null;
+        }
+
+        final int[] counter = new int[1];
+        storage.scan(dq.tableName(), (rid, record) -> {
+            if (rowPred == null || rowPred.test(Row.of(record, rid, cols))) {
+                storage.delete(dq.tableName(), rid);
+                counter[0]++;
+            }
+        });
+        return counter[0];
     }
 }
