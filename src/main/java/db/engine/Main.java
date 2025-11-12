@@ -73,7 +73,7 @@ public class Main {
                 }
                 if (line.isEmpty()) continue;
                 try {
-                    Iterable<Row> rows = qp.stream(line);
+                    Iterable<Row> rows = qp.execute(line);
                     int count = 0;
                     for (Row r : rows) {
                         System.out.println(r.values());
@@ -95,3 +95,20 @@ public class Main {
         }
     }
 }
+
+/* -------------------------------------------------------------------------
+ * Example queries (current supported types: SELECT, INSERT, DELETE)
+ *
+ * SELECT:
+ * 1. SELECT * FROM students WHERE id = 2
+ * 2. SELECT id, name FROM students WHERE active = true AND id >= 5 AND id <= 8
+ * 3. SELECT * FROM students WHERE NOT active OR id < 3
+ *
+ * INSERT (all columns must be provided in schema order or explicitly listed):
+ * 1. INSERT INTO students (id, name, active) VALUES (11, 'Kim', true)
+ *
+ * DELETE (optionally with WHERE; without WHERE removes all rows):
+ * 1. DELETE FROM students WHERE id = 2
+ * 2. DELETE FROM students WHERE active = false AND id > 5
+ * 3. DELETE FROM students
+ * ------------------------------------------------------------------------- */

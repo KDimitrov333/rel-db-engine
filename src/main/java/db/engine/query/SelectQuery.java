@@ -7,4 +7,4 @@ import java.util.List;
  * columns: empty list means SELECT *.
  * where: optional chain of conditions; null => no WHERE.
  */
-public record SelectQuery(String tableName, List<String> columns, WhereClause where) {}
+public record SelectQuery(String tableName, List<String> columns, WhereClause where) implements Query {}

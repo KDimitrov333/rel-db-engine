@@ -90,14 +90,35 @@ public class QueryParser {
                 i++;
                 if (i >= tokens.length) throw new IllegalArgumentException("NOT without following comparison");
             }
-            if (i + 2 >= tokens.length) throw new IllegalArgumentException("Incomplete comparison near token: " + tokens[i]);
+            if (i >= tokens.length) throw new IllegalArgumentException("Unexpected end after NOT");
             String col = tokens[i];
-            String opTok = tokens[i+1];
-            String litTok = tokens[i+2];
-            Condition.Op op = mapOp(opTok);
-            Object lit = parseLiteral(litTok);
-            conditions.add(new Condition(col, op, lit, negated));
-            i += 3;
+            // Decide if this is a bare boolean column (next token is AND/OR or end) or a full comparison
+            if (i + 1 >= tokens.length) {
+                // Bare boolean at end: treat as col = TRUE
+                conditions.add(new Condition(col, Condition.Op.EQ, Boolean.TRUE, negated));
+                i += 1;
+            } else {
+                String next = tokens[i+1];
+                String upperNext = next.toUpperCase();
+                boolean isConnector = upperNext.equals("AND") || upperNext.equals("OR");
+                boolean isOp = next.equals("=") || next.equals("<") || next.equals("<=") || next.equals(">") || next.equals(">=");
+                if (isConnector) {
+                    // Bare boolean before connector
+                    conditions.add(new Condition(col, Condition.Op.EQ, Boolean.TRUE, negated));
+                    i += 1; // consume column only
+                } else if (isOp) {
+                    // Full comparison requires literal token
+                    if (i + 2 >= tokens.length) throw new IllegalArgumentException("Incomplete comparison near token: " + tokens[i]);
+                    String opTok = next;
+                    String litTok = tokens[i+2];
+                    Condition.Op op = mapOp(opTok);
+                    Object lit = parseLiteral(litTok);
+                    conditions.add(new Condition(col, op, lit, negated));
+                    i += 3; // consumed column op literal
+                } else {
+                    throw new IllegalArgumentException("Unexpected token (expected operator or AND/OR): " + next);
+                }
+            }
             if (i < tokens.length) {
                 String connector = tokens[i].toUpperCase();
                 if (!connector.equals("AND") && !connector.equals("OR")) {
