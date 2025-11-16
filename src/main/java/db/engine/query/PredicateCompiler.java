@@ -1,6 +1,7 @@
 package db.engine.query;
 
 import java.util.List;
+import java.util.ArrayList;
 
 import db.engine.catalog.ColumnSchema;
 import db.engine.catalog.DataType;
@@ -27,8 +28,8 @@ public class PredicateCompiler {
         if (atomic.length == 1) return atomic[0];
         List<String> connectors = where.connectors();
         // Build sequentially honoring connectors order (no parentheses support). Group consecutive AND.
-        List<Predicate> orGroups = new java.util.ArrayList<>();
-        List<Predicate> currentAndGroup = new java.util.ArrayList<>();
+    List<Predicate> orGroups = new ArrayList<>();
+    List<Predicate> currentAndGroup = new ArrayList<>();
         currentAndGroup.add(atomic[0]);
         for (int i=0;i<connectors.size();i++) {
             String conn = connectors.get(i);
@@ -39,7 +40,7 @@ public class PredicateCompiler {
                 // finalize current AND group
                 Predicate andCombined = currentAndGroup.size()==1 ? currentAndGroup.get(0) : CompoundPredicate.and(currentAndGroup.toArray(new Predicate[0]));
                 orGroups.add(andCombined);
-                currentAndGroup = new java.util.ArrayList<>();
+                currentAndGroup = new ArrayList<>();
                 currentAndGroup.add(next);
             }
         }

@@ -1,5 +1,6 @@
 package db.engine.query;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import db.engine.catalog.CatalogManager;
@@ -11,6 +12,8 @@ import db.engine.exec.FilterOperator;
 import db.engine.exec.ProjectionOperator;
 import db.engine.exec.Predicate;
 import db.engine.exec.IndexScanOperator;
+import db.engine.exec.JoinOperator;
+import db.engine.exec.Row;
 import db.engine.index.IndexManager;
 import db.engine.storage.StorageManager;
 
@@ -36,36 +39,60 @@ public class QueryPlanner {
     }
 
     public Operator plan(SelectQuery query) {
-        TableSchema ts = catalog.getTableSchema(query.tableName());
-        if (ts == null) throw new IllegalArgumentException("Unknown table: " + query.tableName());
-        List<ColumnSchema> schema = ts.columns();
-
+        // If join present, build left & right sources first; else single-table plan.
         Operator root;
-        Predicate pred = null;
-
-        // Index usage decision: attempt range first, then equality, else fallback scan.
-        RangePlan rangePlan = tryRangeIndex(query, schema);
-        if (rangePlan != null) {
-            root = IndexScanOperator.range(indexManager, storage, rangePlan.indexName, rangePlan.low, rangePlan.high);
-        } else if (canUseIntEqualityIndex(query, schema)) {
-            Condition c = query.where().conditions().get(0);
-            String indexName = findIndexForColumn(query.tableName(), c.columnName());
-            int key = (Integer) c.literalValue();
-            root = new IndexScanOperator(indexManager, storage, indexName, key);
+        List<ColumnSchema> finalSchema;
+        if (query.join() != null) {
+            // Left side
+            TableSchema leftTs = catalog.getTableSchema(query.tableName());
+            if (leftTs == null) throw new IllegalArgumentException("Unknown table (left): " + query.tableName());
+            List<ColumnSchema> leftSchema = leftTs.columns();
+            Operator leftSource = new SeqScanOperator(storage, query.tableName());
+            // Right side
+            String rightTable = query.join().rightTable();
+            TableSchema rightTs = catalog.getTableSchema(rightTable);
+            if (rightTs == null) throw new IllegalArgumentException("Unknown table (right): " + rightTable);
+            List<ColumnSchema> rightSchema = rightTs.columns();
+            Operator rightSource = new SeqScanOperator(storage, rightTable);
+            // Build join
+            root = new JoinOperator(withSchema(leftSource, leftSchema), withSchema(rightSource, rightSchema),
+                                    query.join().leftColumn(), query.join().rightColumn());
+            finalSchema = concatSchemas(leftSchema, rightSchema);
+                if (query.where() != null) {
+                    // Compile predicate against combined schema by constructing synthetic SelectQuery with base table only (join ignored by compiler) and combined schema passed explicitly.
+                    Predicate pred = predicateCompiler.compile(new SelectQuery(query.tableName(), List.of(), query.where(), null), finalSchema);
+                    root = new FilterOperator(root, pred);
+                }
         } else {
-            root = new SeqScanOperator(storage, query.tableName());
-            pred = predicateCompiler.compile(query, schema); // may be null
-            if (pred != null) root = new FilterOperator(root, pred);
+            TableSchema ts = catalog.getTableSchema(query.tableName());
+            if (ts == null) throw new IllegalArgumentException("Unknown table: " + query.tableName());
+            List<ColumnSchema> schema = ts.columns();
+            Predicate pred = null;
+            RangePlan rangePlan = tryRangeIndex(query, schema);
+            if (rangePlan != null) {
+                root = IndexScanOperator.range(indexManager, storage, rangePlan.indexName, rangePlan.low, rangePlan.high);
+            } else if (canUseIntEqualityIndex(query, schema)) {
+                Condition c = query.where().conditions().get(0);
+                String indexName = findIndexForColumn(query.tableName(), c.columnName());
+                int key = (Integer) c.literalValue();
+                root = new IndexScanOperator(indexManager, storage, indexName, key);
+            } else {
+                root = new SeqScanOperator(storage, query.tableName());
+                pred = predicateCompiler.compile(query, schema); // may be null
+                if (pred != null) root = new FilterOperator(root, pred);
+            }
+            finalSchema = schema;
         }
 
         List<String> cols = query.columns();
         if (cols != null && !cols.isEmpty()) {
+            // Build projection indexes over final schema
             int[] idxs = new int[cols.size()];
             for (int i = 0; i < cols.size(); i++) {
                 String name = cols.get(i);
                 int found = -1;
-                for (int j = 0; j < schema.size(); j++) {
-                    if (schema.get(j).name().equals(name)) { found = j; break; }
+                for (int j = 0; j < finalSchema.size(); j++) {
+                    if (finalSchema.get(j).name().equals(name)) { found = j; break; }
                 }
                 if (found == -1) throw new IllegalArgumentException("Projection column not found: " + name);
                 idxs[i] = found;
@@ -73,6 +100,22 @@ public class QueryPlanner {
             root = new ProjectionOperator(root, idxs);
         }
         return root;
+    }
+
+    private Operator withSchema(Operator op, List<ColumnSchema> schema) {
+        // Wrap operator rows to inject schema if operator doesn't provide it.
+        if (op.schema() != null) return op;
+        return new Operator() {
+            @Override public void open() { op.open(); }
+            @Override public Row next() { return op.next(); }
+            @Override public void close() { op.close(); }
+            @Override public List<ColumnSchema> schema() { return schema; }
+        };
+    }
+
+    private List<ColumnSchema> concatSchemas(List<ColumnSchema> left, List<ColumnSchema> right) {
+        ArrayList<ColumnSchema> list = new ArrayList<>(left.size()+right.size());
+        list.addAll(left); list.addAll(right); return list;
     }
 
     private boolean canUseIntEqualityIndex(SelectQuery query, List<ColumnSchema> schema) {

@@ -87,7 +87,7 @@ public class QueryProcessor {
         var cols = ts.columns();
         final Predicate rowPred;
         if (dq.where() != null) {
-            SelectQuery synthetic = new SelectQuery(dq.tableName(), cols.stream().map(c -> c.name()).toList(), dq.where());
+            SelectQuery synthetic = new SelectQuery(dq.tableName(), cols.stream().map(c -> c.name()).toList(), dq.where(), null);
             rowPred = compiler.compile(synthetic, cols);
         } else {
             rowPred = null;

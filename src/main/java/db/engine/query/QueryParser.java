@@ -14,12 +14,16 @@ import java.util.regex.Pattern;
  */
 public class QueryParser {
     private static final Pattern SELECT_PATTERN = Pattern.compile(
-        // Pattern breakdown base portion (WHERE part captured as full tail for custom parsing):
-        //  SELECT\s+(.+)            -> group(1): column list or '*'
-        //  FROM\s+([identifier])    -> group(2): table name
-        //  (?:\s+WHERE\s+(.+))?    -> group(3): full WHERE tail (we parse manually for AND/OR)
-        //  ;?$                      -> optional semicolon
+        // Extended pattern adds optional JOIN ... ON ... before WHERE.
+        // Groups:
+        // 1: column list or '*'
+        // 2: base (left) table name
+        // 3: optional right table in JOIN
+        // 4: optional left qualified column (from ON clause left side)
+        // 5: optional right qualified column (from ON clause right side)
+        // 6: optional WHERE tail
         "^SELECT\\s+(.+)\\s+FROM\\s+([a-zA-Z_][a-zA-Z0-9_]*)" +
+        "(?:\\s+JOIN\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s+ON\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*([a-zA-Z_][a-zA-Z0-9_]*))?" +
         "(?:\\s+WHERE\\s+(.+))?;?$",
         Pattern.CASE_INSENSITIVE
     );
@@ -33,7 +37,10 @@ public class QueryParser {
         }
         String colsPart = m.group(1).trim();
         String tableName = m.group(2).trim();
-        String whereTail = m.group(3);
+        String joinRight = m.group(3) != null ? m.group(3).trim() : null;
+        String joinLeftCol = m.group(4) != null ? m.group(4).trim() : null;
+        String joinRightCol = m.group(5) != null ? m.group(5).trim() : null;
+        String whereTail = m.group(6);
 
         List<String> columns = new ArrayList<>();
         if (!colsPart.equals("*")) {
@@ -48,7 +55,14 @@ public class QueryParser {
         if (whereTail != null) {
             where = parseWhere(whereTail.trim());
         }
-        return new SelectQuery(tableName, columns, where);
+        JoinSpec join = null;
+        if (joinRight != null) {
+            if (joinLeftCol == null || joinRightCol == null) {
+                throw new IllegalArgumentException("JOIN ON clause requires two column identifiers");
+            }
+            join = new JoinSpec(joinRight, joinLeftCol, joinRightCol);
+        }
+        return new SelectQuery(tableName, columns, where, join);
     }
 
     private Condition.Op mapOp(String op) {

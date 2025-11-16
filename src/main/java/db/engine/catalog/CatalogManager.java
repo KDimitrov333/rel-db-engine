@@ -6,6 +6,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Collections;
 import java.lang.reflect.Type;
 
 import com.google.gson.Gson;
@@ -56,7 +57,7 @@ public class CatalogManager {
      * Expose all registered index schemas. Returned map should be treated as read-only by callers.
      */
     public Map<String, IndexSchema> allIndexSchemas() {
-        return java.util.Collections.unmodifiableMap(indexes);
+        return Collections.unmodifiableMap(indexes);
     }
 
     private void loadCatalog() {

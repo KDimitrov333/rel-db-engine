@@ -69,5 +69,5 @@ public class ProjectionOperator implements Operator {
     public void close() { child.close(); }
     
     @Override
-    public java.util.List<ColumnSchema> schema() { return cachedSchema != null ? cachedSchema : child.schema(); }
+    public List<ColumnSchema> schema() { return cachedSchema != null ? cachedSchema : child.schema(); }
 }
