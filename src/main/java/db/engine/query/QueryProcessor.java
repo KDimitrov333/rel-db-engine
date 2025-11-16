@@ -22,9 +22,9 @@ public class QueryProcessor {
     private final QueryPlanner planner;
     private final QueryExecutor executor = new QueryExecutor();
     private final StorageManager storage;
+    private final PredicateCompiler compiler = new PredicateCompiler();
 
     public QueryProcessor(CatalogManager catalog, StorageManager storage, IndexManager indexManager) {
-        PredicateCompiler compiler = new PredicateCompiler();
         this.planner = new QueryPlanner(catalog, storage, compiler, indexManager);
         this.storage = storage;
     }
@@ -47,52 +47,19 @@ public class QueryProcessor {
         if (trimmed.endsWith(";")) trimmed = trimmed.substring(0, trimmed.length()-1).trim();
         String upper = trimmed.toUpperCase();
         if (upper.startsWith("SELECT")) {
-            // Stream rows directly
             return stream(trimmed);
         } else if (upper.startsWith("INSERT")) {
-            InsertQuery iq = parser.parseInsert(trimmed);
-            RID rid = executeInsert(iq); // single parse
-            Row r = Row.of(new Record(List.of("INSERT", rid.pageId(), rid.slotId())), rid);
-            return List.of(r);
+            return List.of(executeInsert(trimmed));
         } else if (upper.startsWith("DELETE")) {
-            DeleteQuery dq = parser.parseDelete(trimmed);
-            int deleted = executeDelete(dq);
-            Row r = Row.of(new Record(List.of("DELETE", deleted)), new RID(-1, -1));
-            return List.of(r);
+            return List.of(executeDelete(trimmed));
         } else {
             throw new IllegalArgumentException("Unrecognized statement (expected SELECT/INSERT/DELETE): " + sql);
         }
     }
 
-    // Expose for testing/verifying parser only.
-    public SelectQuery parseSelect(String sql) { return parser.parseSelect(sql); }
-
-    /** Execute an INSERT statement and return the RID of the inserted record. */
-    public RID executeInsert(String sql) {
-        InsertQuery iq = parser.parseInsert(sql);
-        // Resolve table schema
-        var ts = storage.getCatalog().getTableSchema(iq.tableName());
-        if (ts == null) throw new IllegalArgumentException("Unknown table: " + iq.tableName());
-        // Map columns to positions, build values in schema order.
-        var schemaCols = ts.columns();
-        Map<String,Integer> posMap = new HashMap<>();
-        for (int i=0;i<schemaCols.size();i++) posMap.put(schemaCols.get(i).name(), i);
-        Object[] full = new Object[schemaCols.size()];
-        for (int i=0;i<iq.columns().size();i++) {
-            String col = iq.columns().get(i);
-            Integer pos = posMap.get(col);
-            if (pos == null) throw new IllegalArgumentException("Column not found in table schema: " + col);
-            full[pos] = iq.values().get(i);
-        }
-        // Ensure all columns provided
-        for (int i=0;i<full.length;i++) if (full[i] == null)
-            throw new IllegalArgumentException("Missing value for column '" + schemaCols.get(i).name() + "' (no default support)");
-        var rec = new Record(Arrays.asList(full));
-        return storage.insert(iq.tableName(), rec);
-    }
-
-    // Internal helper avoiding re-parse
-    private RID executeInsert(InsertQuery iq) {
+    /** Parse and execute an INSERT; returns diagnostic row. */
+    public Row executeInsert(String sql) {
+        InsertQuery iq = parser.parseInsert(sql.trim().endsWith(";") ? sql.trim().substring(0, sql.trim().length()-1).trim() : sql.trim());
         var ts = storage.getCatalog().getTableSchema(iq.tableName());
         if (ts == null) throw new IllegalArgumentException("Unknown table: " + iq.tableName());
         var schemaCols = ts.columns();
@@ -108,44 +75,18 @@ public class QueryProcessor {
         for (int i=0;i<full.length;i++) if (full[i] == null)
             throw new IllegalArgumentException("Missing value for column '" + schemaCols.get(i).name() + "' (no default support)");
         var rec = new Record(Arrays.asList(full));
-        return storage.insert(iq.tableName(), rec);
+        RID rid = storage.insert(iq.tableName(), rec);
+        return Row.of(new Record(List.of("INSERT", rid.pageId(), rid.slotId())), rid);
     }
 
-    /** Execute a DELETE statement; returns count of deleted rows. */
-    public int executeDelete(String sql) {
-        DeleteQuery dq = parser.parseDelete(sql);
-        var ts = storage.getCatalog().getTableSchema(dq.tableName());
-        if (ts == null) throw new IllegalArgumentException("Unknown table: " + dq.tableName());
-        var cols = ts.columns();
-
-        // Build row-level predicate if WHERE present
-        final Predicate rowPred;
-        if (dq.where() != null) {
-            PredicateCompiler compiler = new PredicateCompiler();
-            SelectQuery synthetic = new SelectQuery(dq.tableName(), cols.stream().map(c -> c.name()).toList(), dq.where());
-            rowPred = compiler.compile(synthetic, cols);
-        } else {
-            rowPred = null;
-        }
-
-        final int[] counter = new int[1];
-        storage.scan(dq.tableName(), (rid, record) -> {
-            if (rowPred == null || rowPred.test(Row.of(record, rid, cols))) {
-                storage.delete(dq.tableName(), rid);
-                counter[0]++;
-            }
-        });
-        return counter[0];
-    }
-
-    // Internal helper avoiding re-parse
-    private int executeDelete(DeleteQuery dq) {
+    /** Parse and execute a DELETE; returns diagnostic row. */
+    public Row executeDelete(String sql) {
+        DeleteQuery dq = parser.parseDelete(sql.trim().endsWith(";") ? sql.trim().substring(0, sql.trim().length()-1).trim() : sql.trim());
         var ts = storage.getCatalog().getTableSchema(dq.tableName());
         if (ts == null) throw new IllegalArgumentException("Unknown table: " + dq.tableName());
         var cols = ts.columns();
         final Predicate rowPred;
         if (dq.where() != null) {
-            PredicateCompiler compiler = new PredicateCompiler();
             SelectQuery synthetic = new SelectQuery(dq.tableName(), cols.stream().map(c -> c.name()).toList(), dq.where());
             rowPred = compiler.compile(synthetic, cols);
         } else {
@@ -158,6 +99,7 @@ public class QueryProcessor {
                 counter[0]++;
             }
         });
-        return counter[0];
+        int deleted = counter[0];
+        return Row.of(new Record(List.of("DELETE", deleted)), new RID(-1, -1));
     }
 }
