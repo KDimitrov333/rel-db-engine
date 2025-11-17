@@ -20,6 +20,7 @@ public class Main {
         deleteIfExists("indexes/students_id_idx.idx");
         deleteIfExists("catalog/tables.json");
         deleteIfExists("catalog/indexes.json");
+        deleteIfExists("data/enrollments.tbl");
 
         var catalog = new CatalogManager();
         var storage = new StorageManager(catalog);
@@ -37,6 +38,19 @@ public class Main {
         storage.createTable(schema);
         System.out.println("Created table 'students'\n");
 
+        // Second table for join demonstrations: enrollments(student_id -> students.id)
+        TableSchema enrollments = new TableSchema(
+            "enrollments",
+            List.of(
+                new ColumnSchema("id", DataType.INT, 0), // enrollment id
+                new ColumnSchema("student_id", DataType.INT, 0),
+                new ColumnSchema("course", DataType.VARCHAR, 50)
+            ),
+            "data/enrollments.tbl"
+        );
+        storage.createTable(enrollments);
+        System.out.println("Created table 'enrollments'\n");
+
         List<Record> seed = List.of(
             new Record(List.of(1, "Alice", true)),
             new Record(List.of(2, "Bob", false)),
@@ -51,7 +65,21 @@ public class Main {
             new Record(List.of(10, "Judy", true))
         );
         for (Record r : seed) storage.insert("students", r);
-        System.out.println("Inserted " + seed.size() + " rows (including duplicate id=2)\n");
+        System.out.println("Inserted " + seed.size() + " student rows (including duplicate id=2)\n");
+
+        // Seed enrollments referencing student ids
+        List<Record> enrollSeed = List.of(
+            new Record(List.of(100, 1, "Math")),
+            new Record(List.of(101, 1, "Physics")),
+            new Record(List.of(102, 2, "Chemistry")),
+            new Record(List.of(103, 2, "Biology")),
+            new Record(List.of(104, 3, "Math")),
+            new Record(List.of(105, 5, "History")),
+            new Record(List.of(106, 8, "Math")),
+            new Record(List.of(107, 10, "Art"))
+        );
+        for (Record r : enrollSeed) storage.insert("enrollments", r);
+        System.out.println("Inserted " + enrollSeed.size() + " enrollment rows\n");
 
         // Build index on students(id) for optimized equality lookups in queries
         index.createIndex("students_id_idx", "students", "id");
@@ -97,7 +125,10 @@ public class Main {
 }
 
 /* -------------------------------------------------------------------------
- * Example queries (current supported types: SELECT, INSERT, DELETE)
+ * Example queries (current supported types: SELECT, INSERT, DELETE, INNER JOIN)
+ * Tables:
+ *   students(id INT, name VARCHAR, active BOOLEAN)
+ *   enrollments(id INT, student_id INT, course VARCHAR)
  *
  * SELECT:
  * 1. SELECT * FROM students WHERE id = 2
@@ -111,4 +142,9 @@ public class Main {
  * 1. DELETE FROM students WHERE id = 2
  * 2. DELETE FROM students WHERE active = false AND id > 5
  * 3. DELETE FROM students
+ *
+ * INNER JOIN:
+ * 1. SELECT * FROM students JOIN enrollments ON id = student_id
+ * 2. SELECT name, course FROM students JOIN enrollments ON id = student_id WHERE active = true
+ * 3. SELECT id, name FROM students JOIN enrollments ON id = student_id WHERE course = 'Math'
  * ------------------------------------------------------------------------- */

@@ -3,7 +3,6 @@ package db.engine.exec;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -24,7 +23,8 @@ public class JoinOperator implements Operator {
     // Materialized right side keyed by join value for faster lookup
     private Map<Object, List<Row>> rightHash;
     private Row currentLeft;
-    private Iterator<Row> currentMatches;
+    private List<Row> currentMatchList = Collections.emptyList();
+    private int matchIndex = 0; // index within currentMatchList
 
     public JoinOperator(Operator left, Operator right, String leftColumn, String rightColumn) {
         this.left = left; this.right = right; this.leftColumn = leftColumn; this.rightColumn = rightColumn;
@@ -50,33 +50,42 @@ public class JoinOperator implements Operator {
         }
         right.close(); // no longer needed
         currentLeft = left.next();
-        currentMatches = Collections.emptyIterator();
+        currentMatchList = Collections.emptyList();
+        matchIndex = 0;
     }
 
     @Override
     public Row next() {
         while (true) {
             if (currentLeft == null) return null;
-            if (currentMatches.hasNext()) {
-                Row matchRight = currentMatches.next();
+
+            // If we have remaining matches for the current left row, emit next combined row.
+            if (matchIndex < currentMatchList.size()) {
+                Row matchRight = currentMatchList.get(matchIndex++);
                 List<Object> combined = new ArrayList<>(currentLeft.values().size() + matchRight.values().size());
                 combined.addAll(currentLeft.values());
                 combined.addAll(matchRight.values());
-                return Row.of(new Record(combined), currentLeft.rid(), joinedSchema);
+                // Capture left RID before potentially advancing.
+                Row output = Row.of(new Record(combined), currentLeft.rid(), joinedSchema);
+                if (matchIndex >= currentMatchList.size()) { // exhausted matches for this left row
+                    // advance left row for next call
+                    currentLeft = left.next();
+                    currentMatchList = Collections.emptyList();
+                    matchIndex = 0;
+                }
+                return output;
             }
-            // Advance left and prepare matches
+
+            // Need to load matches for current left row
             Object lVal = valueByName(currentLeft, leftColumn, left.schema());
             List<Row> matches = rightHash.get(lVal);
-            if (matches != null) {
-                currentMatches = matches.iterator();
-            } else {
-                currentMatches = Collections.emptyIterator();
-            }
-            // If no matches, advance left and loop again; if matches, loop will emit them.
-            if (!currentMatches.hasNext()) {
+            if (matches == null || matches.isEmpty()) { // no matches: advance left and retry
                 currentLeft = left.next();
                 continue;
             }
+            currentMatchList = matches;
+            matchIndex = 0; // start emitting matches on next loop iteration (or immediately)
+            // Loop will iterate again and emit first match.
         }
     }
 

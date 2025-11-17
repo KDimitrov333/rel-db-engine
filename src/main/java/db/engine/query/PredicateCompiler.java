@@ -28,8 +28,8 @@ public class PredicateCompiler {
         if (atomic.length == 1) return atomic[0];
         List<String> connectors = where.connectors();
         // Build sequentially honoring connectors order (no parentheses support). Group consecutive AND.
-    List<Predicate> orGroups = new ArrayList<>();
-    List<Predicate> currentAndGroup = new ArrayList<>();
+        List<Predicate> orGroups = new ArrayList<>();
+        List<Predicate> currentAndGroup = new ArrayList<>();
         currentAndGroup.add(atomic[0]);
         for (int i=0;i<connectors.size();i++) {
             String conn = connectors.get(i);
