@@ -65,10 +65,9 @@ public class JoinOperator implements Operator {
                 List<Object> combined = new ArrayList<>(currentLeft.values().size() + matchRight.values().size());
                 combined.addAll(currentLeft.values());
                 combined.addAll(matchRight.values());
-                // Capture left RID before potentially advancing.
-                Row output = Row.of(new Record(combined), currentLeft.rid(), joinedSchema);
+                // Build output before any pointer changes
+                Row output = Row.of(new Record(combined), matchRight.rid(), joinedSchema);
                 if (matchIndex >= currentMatchList.size()) { // exhausted matches for this left row
-                    // advance left row for next call
                     currentLeft = left.next();
                     currentMatchList = Collections.emptyList();
                     matchIndex = 0;
