@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Scanner;
 import db.engine.query.QueryProcessor;
 import db.engine.exec.Row;
+import db.engine.cli.TablePrinter;
 
 public class Main {
     public static void main(String[] args) {
@@ -101,14 +102,10 @@ public class Main {
                 }
                 if (line.isEmpty()) continue;
                 try {
-                    Iterable<Row> rows = qp.execute(line);
-                    int count = 0;
-                    for (Row r : rows) {
-                        System.out.println(r.values());
-                        count++;
-                        if (count % 1000 == 0) System.out.println("-- fetched " + count + " rows so far");
-                    }
-                    System.out.println("(" + count + " row(s))");
+                    Iterable<Row> rowsIter = qp.execute(line);
+                    java.util.ArrayList<Row> rows = new java.util.ArrayList<>();
+                    for (Row r : rowsIter) rows.add(r);
+                    TablePrinter.print(rows);
                 } catch (Exception ex) {
                     System.out.println("Error: " + ex.getMessage());
                 }
@@ -122,6 +119,7 @@ public class Main {
             System.err.println("[WARN] Could not delete existing file: " + path);
         }
     }
+
 }
 
 /* -------------------------------------------------------------------------
