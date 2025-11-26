@@ -9,7 +9,7 @@ import db.engine.catalog.ColumnSchema;
 import db.engine.catalog.DataType;
 
 public class HeapPageTest {
-    private static final int PAGE_SIZE = 4096;
+    private static final int PAGE_SIZE = StorageManager.PAGE_SIZE;
 
     private List<ColumnSchema> schema() {
         return List.of(

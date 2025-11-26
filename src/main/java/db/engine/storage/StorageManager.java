@@ -16,11 +16,11 @@ public class StorageManager {
     private final BufferManager bufferManager;
 
     // Fixed page size for initial buffer manager introduction
-    public static final int PAGE_SIZE = 4096;
+    public static final int PAGE_SIZE = 16 * 1024; // 16KB pages for benchmark runs
 
     public StorageManager(CatalogManager catalog) {
         this.catalog = catalog;
-        this.bufferManager = new BufferManager(PAGE_SIZE, 64); // capacity 64 pages
+        this.bufferManager = new BufferManager(PAGE_SIZE, 1024); // capacity 1024 pages
     }
 
     // Allow late binding to avoid circular construction concerns

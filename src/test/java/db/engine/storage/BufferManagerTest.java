@@ -13,11 +13,12 @@ public class BufferManagerTest {
         File temp = File.createTempFile("buf-test", ".tbl");
         temp.deleteOnExit();
         try (RandomAccessFile raf = new RandomAccessFile(temp, "rw")) {
-            byte[] payload = new byte[4096];
+            int ps = StorageManager.PAGE_SIZE;
+            byte[] payload = new byte[ps];
             payload[0] = 42; // marker
             raf.write(payload);
         }
-        BufferManager bm = new BufferManager(4096, 8);
+        BufferManager bm = new BufferManager(StorageManager.PAGE_SIZE, 8);
         Page p1 = bm.getPage(temp.getPath(), 0);
         assertEquals(42, p1.data()[0]);
         Page p2 = bm.getPage(temp.getPath(), 0); // cached
@@ -28,7 +29,7 @@ public class BufferManagerTest {
     void beyondEOFReturnsZeroedPage() throws Exception {
         File temp = File.createTempFile("buf-test-empty", ".tbl");
         temp.deleteOnExit();
-        BufferManager bm = new BufferManager(4096, 4);
+        BufferManager bm = new BufferManager(StorageManager.PAGE_SIZE, 4);
         Page p = bm.getPage(temp.getPath(), 3); // pageId 3 beyond EOF
         for (byte b : p.data()) assertEquals(0, b);
     }
