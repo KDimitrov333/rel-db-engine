@@ -6,198 +6,295 @@ import db.engine.catalog.DataType;
 import db.engine.catalog.TableSchema;
 import db.engine.index.IndexManager;
 import db.engine.query.QueryProcessor;
-import db.engine.exec.Row;
 import db.engine.storage.Record;
 import db.engine.storage.StorageManager;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Random;
+import java.util.Iterator;
 
-/**
- * Micro-benchmark harness for the engine.
- * NOT a unit test; run manually. Recommended invocation (uses fat jar with dependencies):
- *
- *   mvn -q -DskipTests package
- *   java -cp target/relational-db-engine-all.jar db.engine.bench.PerfBench
- *
- * To change the number of seeded `students` rows, edit the `DEFAULT_ROWS` constant in
- * this file or pass a numeric CLI argument. Editing `DEFAULT_ROWS` is the simplest
- * way to make a reproducible, checked-in change for benchmarks.
- *
- * The harness prints timings (ms) for these operations:
- *  - Full table scan (SELECT * FROM students)
- *  - Indexed equality lookup (id = mid value)
- *  - Non-index equality lookup (name = 'X...' ) for comparison
- *  - Join (students JOIN enrollments)
- */
 public class PerfBench {
+    private static final String STUDENTS = "bench_students";
+    private static final String ENROLLMENTS = "bench_enrollments";
+    public static void main(String[] args) throws Exception {
+        Path root = Paths.get("benchdata");
+        Files.createDirectories(root);
+        System.out.println("Benchmark root: " + root.toAbsolutePath());
 
-    // Change this constant to adjust the default number of rows seeded for the benchmark.
-    private static final int DEFAULT_ROWS = 10000;
-    // How often to log progress during seeding (in rows)
-    private static final int LOG_INTERVAL = 1000;
+        // Parse CLI overrides for seed sizes and options.
+        BenchmarkConfig cfg = BenchmarkConfig.fromArgs(root, args);
 
-    public static void main(String[] args) {
-        int rows = args.length > 0 ? Integer.parseInt(args[0]) : DEFAULT_ROWS;
-        int enrollRows = Math.max(1, rows / 10); // smaller second table
-        System.out.println("-- PerfBench starting: students=" + rows + ", enrollments=" + enrollRows);
-        File dataDir = new File("benchdata");
-        // Ensure benchdata is clean between runs to avoid accumulating prior inserts
-        deleteDir(dataDir);
-        dataDir.mkdirs();
-        // Clean previous bench files and also clear global catalog/index files so the
-        // benchmark gets a fresh CatalogManager (avoids reading tables registered by Main).
-        cleanFile("catalog/tables.json");
-        cleanFile("catalog/indexes.json");
-        // remove any leftover index files under indexes/
-        deleteDir(new File("indexes"));
+        Path dataDir = root.resolve("data");
+        Files.createDirectories(dataDir);
 
         CatalogManager catalog = new CatalogManager();
         StorageManager storage = new StorageManager(catalog);
         IndexManager index = new IndexManager(catalog, storage);
 
-        TableSchema students = new TableSchema(
-            "students",
-            List.of(
-                new ColumnSchema("id", DataType.INT, 0),
-                new ColumnSchema("name", DataType.VARCHAR, 50),
-                new ColumnSchema("active", DataType.BOOLEAN, 0)
-            ),
-            "benchdata/students.tbl"
-        );
-        storage.createTable(students);
+        // Seed tables if missing; use --reseed to force fresh data.
+        boolean forceReseed = false;
+        for (String a : args) { if ("--reseed".equals(a)) { forceReseed = true; break; } }
+        boolean studentsExists = catalog.getTableSchema(STUDENTS) != null && fileExists(catalog.getTableSchema(STUDENTS));
+        boolean enrollmentsExists = catalog.getTableSchema(ENROLLMENTS) != null && fileExists(catalog.getTableSchema(ENROLLMENTS));
 
-        TableSchema enroll = new TableSchema(
-            "enrollments",
-            List.of(
-                new ColumnSchema("id", DataType.INT, 0),
-                new ColumnSchema("student_id", DataType.INT, 0),
-                new ColumnSchema("course", DataType.VARCHAR, 50)
-            ),
-            "benchdata/enrollments.tbl"
-        );
-        storage.createTable(enroll);
+        if (forceReseed || !studentsExists || !enrollmentsExists) {
+            System.out.println("Seeding students=" + cfg.rowsStudents + ", enrollments=" + cfg.rowsEnrollments);
+            // ID pool size matches students to scale with dataset
+            DataPool idPool = new DataPool((int) cfg.rowsStudents, cfg.seed);
+            NamePool names = new NamePool();
+            seedStudents(catalog, storage, dataDir, (int) cfg.rowsStudents, idPool, cfg.useNames ? names : null, STUDENTS);
+            seedEnrollments(catalog, storage, dataDir, (int) cfg.rowsEnrollments, idPool, ENROLLMENTS);
+        } else {
+            System.out.println("Using existing bench tables under: " + dataDir.toAbsolutePath());
+        }
 
-        long overallStart = System.nanoTime();
-
-        long seedStart = System.nanoTime();
-        seedStudents(storage, rows);
-        long seedStudentsMs = (System.nanoTime() - seedStart) / 1_000_000;
-
-        long enrollStart = System.nanoTime();
-        seedEnrollments(storage, enrollRows, rows);
-        long seedEnrollMs = (System.nanoTime() - enrollStart) / 1_000_000;
-
-        long idxStart = System.nanoTime();
-        index.createIndex("students_id_idx", "students", "id");
-        long idxMs = (System.nanoTime() - idxStart) / 1_000_000;
-
-        long seedingTotalMs = seedStudentsMs + seedEnrollMs;
-        System.out.println("Seeding times (ms): students=" + seedStudentsMs + " enrollments=" + seedEnrollMs + " indexCreate=" + idxMs);
-
+        // Build index on students(id) used by equality/range queries
+        index.createIndex("bench_students_id_idx", STUDENTS, "id");
         QueryProcessor qp = new QueryProcessor(catalog, storage, index);
 
-        // Warm-up (JIT) small queries
-        runAndDiscard(qp, "SELECT * FROM students WHERE id = 1");
-        runAndDiscard(qp, "SELECT * FROM students JOIN enrollments ON id = student_id WHERE id = 1");
+        Map<String, StatsAggregator> stats = new LinkedHashMap<>();
+        Map<String, StatsAggregator> rowStats = new LinkedHashMap<>();
+        Map<String, String> sqlTemplates = new LinkedHashMap<>();
+        Map<String, String> descriptions = Map.of(
+            "scan", "Full table scan of students",
+            "equality_hit", "Indexed equality lookup for existing id",
+            "equality_seq", "Sequential equality lookup for existing name (non-indexed VARCHAR)",
+            "equality_miss", "Non-indexed equality lookup for non-existing name",
+            "range", "Indexed range query on id",
+            "join", "Inner join students ↔ enrollments on id = student_id"
+        );
+        DataPool idPool = new DataPool((int) cfg.rowsStudents, cfg.seed);
+        // Collect existing ids/names to ensure hit queries use present literals
+        ArrayList<String> existingNames = new ArrayList<>();
+        ArrayList<Integer> existingIds = new ArrayList<>();
+        storage.scan(STUDENTS, (rid, rec) -> {
+            Object idv = rec.getValues().get(0);
+            if (idv instanceof Integer) existingIds.add((Integer) idv);
+            Object nv = rec.getValues().get(1);
+            if (nv instanceof String) existingNames.add((String) nv);
+        });
+        // Use time-based RNG per run for varied samples
+        Random literalRng = new Random(System.nanoTime());
 
-        long scanMs = time(qp, "SELECT * FROM students");
-        int mid = rows / 2;
-        long eqIndexMs = time(qp, "SELECT * FROM students WHERE id = " + mid);
-        // pick a generated name that exists: name pattern is NameXXXX
-        long eqScanMs = time(qp, "SELECT * FROM students WHERE name = 'Name" + pad(mid) + "'");
-        long joinMs = time(qp, "SELECT * FROM students JOIN enrollments ON id = student_id");
+        // Pre-sample literals: shuffle and take 'runs' items for guaranteed hits
+        List<Integer> shuffledIds = new ArrayList<>(existingIds);
+        List<String> shuffledNames = new ArrayList<>(existingNames);
+        Collections.shuffle(shuffledIds, literalRng);
+        Collections.shuffle(shuffledNames, literalRng);
+        List<Integer> sampledIds = new ArrayList<>(shuffledIds.subList(0, Math.min(cfg.runs, shuffledIds.size())));
+        List<String> sampledNames = new ArrayList<>(shuffledNames.subList(0, Math.min(cfg.runs, shuffledNames.size())));
+        for (String q : cfg.queries) {
+            StatsAggregator agg = new StatsAggregator();
+            StatsAggregator rowsAgg = new StatsAggregator();
+            for (int i = 0; i < cfg.warmup; i++) runQueryOnce(qp, storage, q, idPool, existingNames, literalRng, 0, sampledIds, sampledNames);
+            for (int i = 0; i < cfg.runs; i++) {
+                long t0 = System.nanoTime();
+                RunResult result = runQueryOnce(qp, storage, q, idPool, existingNames, literalRng, i, sampledIds, sampledNames);
+                long t1 = System.nanoTime();
+                agg.add(t1 - t0);
+                rowsAgg.add(result.rows);
+                // Store template only
+                if (!sqlTemplates.containsKey(q)) sqlTemplates.put(q, result.templateSql);
+            }
+            stats.put(q, agg);
+            rowStats.put(q, rowsAgg);
+                // Print in milliseconds
+                double meanMs = agg.mean() / 1_000_000.0;
+                long medianMs = Math.round(agg.median() / 1_000_000.0);
+                long minMs = Math.round(agg.min() / 1_000_000.0);
+                long maxMs = Math.round(agg.max() / 1_000_000.0);
+                System.out.printf(Locale.ROOT,
+                    "%s -> count=%d mean=%.2fms median=%dms min=%dms max=%dms\n",
+                    q, agg.count(), meanMs, medianMs, minMs, maxMs);
+        }
 
-        long queriesTotalMs = scanMs + eqIndexMs + eqScanMs + joinMs;
-        long overallMs = (System.nanoTime() - overallStart) / 1_000_000;
-
-        // Print overall breakdown
-        System.out.println();
-        System.out.println("Overall timing (ms): total=" + overallMs);
-        printRow("Seeding Total", seedingTotalMs);
-        printRow(" Index Create", idxMs);
-        printRow("Query Phase", queriesTotalMs);
-        // percentages
-        double pctSeed = seedingTotalMs * 100.0 / overallMs;
-        double pctIdx = idxMs * 100.0 / overallMs;
-        double pctQuery = queriesTotalMs * 100.0 / overallMs;
-        System.out.printf("Breakdown: seeding=%.1f%% index=%.1f%% queries=%.1f%%%n", pctSeed, pctIdx, pctQuery);
-
-        System.out.println();
-        System.out.println("Results (milliseconds):");
-        printRow("Full Scan", scanMs);
-        printRow("Indexed Equality", eqIndexMs);
-        printRow("Non-index Equality", eqScanMs);
-        printRow("Join", joinMs);
-        System.out.println("-- PerfBench complete");
+        ReportWriter writer = new ReportWriter(root.resolve("results"));
+        writer.writeJson(stats, rowStats, descriptions, sqlTemplates, cfg);
+        System.out.println("Wrote JSON to: " + root.resolve("results").toAbsolutePath());
     }
 
-    private static void seedStudents(StorageManager storage, int rows) {
-        Random rnd = new Random(42);
-        for (int i = 1; i <= rows; i++) {
-            int id = i;
-            String name = "Name" + pad(i);
-            boolean active = rnd.nextBoolean();
-            storage.insert("students", new Record(List.of(id, name, active)));
+    private static boolean fileExists(TableSchema ts) {
+        if (ts == null) return false;
+        return new File(ts.filePath()).exists();
+    }
+
+    private static void seedStudents(CatalogManager catalog,
+                                     StorageManager storage,
+                                     Path dataDir,
+                                     int count,
+                                     DataPool pool,
+                                     NamePool names,
+                                     String tableName) throws Exception {
+        TableSchema existing = catalog.getTableSchema(tableName);
+        String studentPath = dataDir.resolve(tableName + ".tbl").toString();
+        if (existing == null) {
+            TableSchema students = new TableSchema(
+                    tableName,
+                    List.of(
+                            new ColumnSchema("id", DataType.INT, 0),
+                            new ColumnSchema("name", DataType.VARCHAR, 64)
+                    ),
+                    studentPath
+            );
+            storage.createTable(students);
+        } else {
+            // Recreate file for fresh seed
+            File f = new File(existing.filePath());
+            if (f.exists()) f.delete();
+            try {
+                f.getParentFile().mkdirs();
+                f.createNewFile();
+            } catch (IOException e) {
+                throw new RuntimeException("Failed recreating students file", e);
+            }
+        }
+
+        final int LOG_INTERVAL = 1_000;
+        for (int i = 1; i <= count; i++) {
+            int id = pool.randomId();
+            String name = names != null ? names.randomFullName() : "Name" + i;
+            List<Object> vals = List.of(id, name);
+            storage.insert(tableName, new Record(vals));
             if (i % LOG_INTERVAL == 0) {
-                System.out.println("Seeded students: " + i + "/" + rows);
+                System.out.println("Seeded students: " + i + "/" + count);
             }
         }
     }
 
-    private static void seedEnrollments(StorageManager storage, int rows, int maxStudentId) {
-        Random rnd = new Random(99);
-        String[] courses = {"Math","Physics","Chemistry","Biology","History","Art"};
-        for (int i = 1; i <= rows; i++) {
-            int eid = 100000 + i;
-            int sid = 1 + rnd.nextInt(maxStudentId); // uniform distribution
-            String course = courses[rnd.nextInt(courses.length)];
-            storage.insert("enrollments", new Record(List.of(eid, sid, course)));
+    private static void seedEnrollments(CatalogManager catalog,
+                                        StorageManager storage,
+                                        Path dataDir,
+                                        int count,
+                                        DataPool pool,
+                                        String tableName) throws Exception {
+        TableSchema existing = catalog.getTableSchema(tableName);
+        String enrollPath = dataDir.resolve(tableName + ".tbl").toString();
+        if (existing == null) {
+            TableSchema enrollments = new TableSchema(
+                    tableName,
+                    List.of(
+                            new ColumnSchema("student_id", DataType.INT, 0),
+                            new ColumnSchema("course", DataType.VARCHAR, 32)
+                    ),
+                    enrollPath
+            );
+            storage.createTable(enrollments);
+        } else {
+            File f = new File(existing.filePath());
+            if (f.exists()) f.delete();
+            try {
+                f.getParentFile().mkdirs();
+                f.createNewFile();
+            } catch (IOException e) {
+                throw new RuntimeException("Failed recreating enrollments file", e);
+            }
+        }
+
+        final int LOG_INTERVAL = 1_000;
+        for (int i = 1; i <= count; i++) {
+            int sid = pool.randomId();
+            String course = "C" + ((i % 200) + 1);
+            List<Object> vals = List.of(sid, course);
+            storage.insert(tableName, new Record(vals));
             if (i % LOG_INTERVAL == 0) {
-                System.out.println("Seeded enrollments: " + i + "/" + rows);
+                System.out.println("Seeded enrollments: " + i + "/" + count);
             }
         }
     }
 
-    private static long time(QueryProcessor qp, String sql) {
-        long start = System.nanoTime();
-        int count = 0;
-        for (Row r : qp.execute(sql)) { if (r != null) count++; }
-        long end = System.nanoTime();
-        long ms = (end - start) / 1_000_000;
-        System.out.println(sql + " => rows=" + count + " time=" + ms + "ms");
-        return ms;
-    }
-
-    private static void runAndDiscard(QueryProcessor qp, String sql) {
-        for (Row r : qp.execute(sql)) { if (r == null) break; }
-    }
-
-    private static void cleanFile(String path) {
-        File f = new File(path);
-        if (f.exists()) f.delete();
-    }
-
-    private static void deleteDir(File dir) {
-        if (!dir.exists()) return;
-        File[] children = dir.listFiles();
-        if (children != null) {
-            for (File c : children) {
-                if (c.isDirectory()) deleteDir(c);
-                else c.delete();
+    private static RunResult runQueryOnce(QueryProcessor qp, StorageManager storage, String q, DataPool pool,
+                                          List<String> names, Random rng,
+                                          int runIndex, List<Integer> sampledIds,
+                                          List<String> sampledNames) throws Exception {
+        String sql;
+        String template;
+        int count;
+        switch (q) {
+            case "scan":
+                sql = "SELECT * FROM " + STUDENTS;
+                template = "SELECT * FROM " + STUDENTS;
+                count = countRows(qp.execute(sql));
+                break;
+            case "equality_hit": {
+                // Guaranteed-hit id
+                int attempts = 0;
+                do {
+                    int existing = sampledIds.get((runIndex + attempts) % sampledIds.size());
+                    sql = "SELECT * FROM " + STUDENTS + " WHERE id = " + existing;
+                    count = countRows(qp.execute(sql));
+                    attempts++;
+                } while (count == 0 && attempts < 10);
+                template = "SELECT * FROM " + STUDENTS + " WHERE id = ?";
+                break;
             }
+            case "equality_seq": {
+                // Guaranteed-hit name (non-indexed)
+                int attempts = 0;
+                do {
+                    String name = sampledNames.get((runIndex + attempts) % sampledNames.size());
+                    String lit = name.replace("'", "''");
+                    sql = "SELECT * FROM " + STUDENTS + " WHERE name = '" + lit + "'";
+                    count = countRows(qp.execute(sql));
+                    attempts++;
+                } while (count == 0 && attempts < 10);
+                template = "SELECT * FROM " + STUDENTS + " WHERE name = ?";
+                break;
+            }
+            case "equality_miss": {
+                String missing = "__NO_SUCH_NAME__";
+                sql = "SELECT * FROM " + STUDENTS + " WHERE name = '" + missing + "'";
+                template = "SELECT * FROM " + STUDENTS + " WHERE name = ?";
+                count = countRows(qp.execute(sql));
+                break;
+            }
+            case "range": {
+                int attempts = 0;
+                int[] widths = {25, 200, 1000, 5000};
+                do {
+                    int center = sampledIds.get((runIndex + attempts) % sampledIds.size());
+                    int delta = widths[rng.nextInt(widths.length)];
+                    int lo = Math.max(0, center - delta);
+                    int hi = center + delta;
+                    sql = "SELECT * FROM " + STUDENTS + " WHERE id >= " + lo + " AND id <= " + hi;
+                    count = countRows(qp.execute(sql));
+                    attempts++;
+                } while (count == 0 && attempts < 10);
+                template = "SELECT * FROM " + STUDENTS + " WHERE id >= ? AND id <= ?";
+                break;
+            }
+            case "join":
+                sql = "SELECT * FROM " + STUDENTS + " JOIN " + ENROLLMENTS + " ON id = student_id";
+                template = "SELECT * FROM " + STUDENTS + " JOIN " + ENROLLMENTS + " ON id = student_id";
+                count = countRows(qp.execute(sql));
+                break;
+            default:
+                return new RunResult(0, "");
         }
-        dir.delete();
+            return new RunResult(count, template);
     }
 
-    private static String pad(int i) {
-        String s = String.valueOf(i);
-        while (s.length() < 5) s = "0" + s; // 5 digits for alignment
-        return s;
+    private static int countRows(Iterable<db.engine.exec.Row> rows) {
+        int c = 0;
+        Iterator<?> it = rows.iterator();
+        while (it.hasNext()) { it.next(); c++; }
+        return c;
     }
 
-    private static void printRow(String label, long ms) {
-        System.out.printf("%-18s %8d%n", label + ":", ms);
+    // Results per run (row count + template SQL)
+
+    private static final class RunResult {
+        final int rows;
+        final String templateSql;
+        RunResult(int rows, String templateSql) { this.rows = rows; this.templateSql = templateSql; }
     }
 }

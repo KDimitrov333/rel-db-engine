@@ -51,9 +51,30 @@
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.3.0</version>
-                <configuration>
-                    <mainClass>db.engine.Main</mainClass>
-                </configuration>
+                <executions>
+                    <!-- Default run launches the REPL Main -->
+                    <execution>
+                        <id>run-main</id>
+                        <configuration>
+                            <mainClass>db.engine.Main</mainClass>
+                            <classpathScope>runtime</classpathScope>
+                        </configuration>
+                        <goals>
+                            <goal>java</goal>
+                        </goals>
+                    </execution>
+                    <!-- Dedicated execution for PerfBench harness -->
+                    <execution>
+                        <id>perfbench</id>
+                        <configuration>
+                            <mainClass>db.engine.bench.PerfBench</mainClass>
+                            <classpathScope>runtime</classpathScope>
+                        </configuration>
+                        <goals>
+                            <goal>java</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
             <!-- Assembly plugin for optional fat jar (bench) -->
             <plugin>
@@ -66,6 +87,11 @@
                     </descriptorRefs>
                     <finalName>relational-db-engine-all</finalName>
                     <appendAssemblyId>false</appendAssemblyId>
+                    <archive>
+                        <manifest>
+                            <mainClass>db.engine.bench.PerfBench</mainClass>
+                        </manifest>
+                    </archive>
                 </configuration>
                 <executions>
                     <execution>

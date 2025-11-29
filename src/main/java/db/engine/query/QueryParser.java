@@ -91,28 +91,28 @@ public class QueryParser {
         throw new IllegalArgumentException("Unsupported literal: " + raw);
     }
 
-    // Parse simple AND/OR chain without parentheses.
+    // Parse simple AND/OR chain without parentheses. Respects single quotes in literals.
     private WhereClause parseWhere(String raw) {
-        String[] tokens = raw.split("\\s+");
+        List<String> tokens = tokenizeWhere(raw);
         List<Condition> conditions = new ArrayList<>();
         List<String> connectors = new ArrayList<>();
         int i = 0;
-        while (i < tokens.length) {
+        while (i < tokens.size()) {
             boolean negated = false;
-            if (tokens[i].equalsIgnoreCase("NOT")) {
+            if (tokens.get(i).equalsIgnoreCase("NOT")) {
                 negated = true;
                 i++;
-                if (i >= tokens.length) throw new IllegalArgumentException("NOT without following comparison");
+                if (i >= tokens.size()) throw new IllegalArgumentException("NOT without following comparison");
             }
-            if (i >= tokens.length) throw new IllegalArgumentException("Unexpected end after NOT");
-            String col = tokens[i];
+            if (i >= tokens.size()) throw new IllegalArgumentException("Unexpected end after NOT");
+            String col = tokens.get(i);
             // Decide if this is a bare boolean column (next token is AND/OR or end) or a full comparison
-            if (i + 1 >= tokens.length) {
+            if (i + 1 >= tokens.size()) {
                 // Bare boolean at end: treat as col = TRUE
                 conditions.add(new Condition(col, Condition.Op.EQ, Boolean.TRUE, negated));
                 i += 1;
             } else {
-                String next = tokens[i+1];
+                String next = tokens.get(i+1);
                 String upperNext = next.toUpperCase();
                 boolean isConnector = upperNext.equals("AND") || upperNext.equals("OR");
                 boolean isOp = next.equals("=") || next.equals("<") || next.equals("<=") || next.equals(">") || next.equals(">=");
@@ -122,9 +122,9 @@ public class QueryParser {
                     i += 1; // consume column only
                 } else if (isOp) {
                     // Full comparison requires literal token
-                    if (i + 2 >= tokens.length) throw new IllegalArgumentException("Incomplete comparison near token: " + tokens[i]);
+                    if (i + 2 >= tokens.size()) throw new IllegalArgumentException("Incomplete comparison near token: " + tokens.get(i));
                     String opTok = next;
-                    String litTok = tokens[i+2];
+                    String litTok = tokens.get(i+2);
                     Condition.Op op = mapOp(opTok);
                     Object lit = parseLiteral(litTok);
                     conditions.add(new Condition(col, op, lit, negated));
@@ -133,16 +133,39 @@ public class QueryParser {
                     throw new IllegalArgumentException("Unexpected token (expected operator or AND/OR): " + next);
                 }
             }
-            if (i < tokens.length) {
-                String connector = tokens[i].toUpperCase();
+            if (i < tokens.size()) {
+                String connector = tokens.get(i).toUpperCase();
                 if (!connector.equals("AND") && !connector.equals("OR")) {
-                    throw new IllegalArgumentException("Unexpected token (expected AND/OR): " + tokens[i]);
+                    throw new IllegalArgumentException("Unexpected token (expected AND/OR): " + tokens.get(i));
                 }
                 connectors.add(connector);
                 i++;
             }
         }
         return new WhereClause(conditions, connectors);
+    }
+
+    // Tokenize WHERE clause respecting single-quoted strings (no escaping inside quotes).
+    private List<String> tokenizeWhere(String raw) {
+        List<String> out = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inQuote = false;
+        for (int i = 0; i < raw.length(); i++) {
+            char ch = raw.charAt(i);
+            if (ch == '\'') {
+                inQuote = !inQuote;
+                current.append(ch);
+            } else if (Character.isWhitespace(ch) && !inQuote) {
+                if (current.length() > 0) {
+                    out.add(current.toString());
+                    current.setLength(0);
+                }
+            } else {
+                current.append(ch);
+            }
+        }
+        if (current.length() > 0) out.add(current.toString());
+        return out;
     }
 
     // INSERT INTO tableName (col1, col2, ...) VALUES (val1, val2, ...);
