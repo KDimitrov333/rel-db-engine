@@ -159,7 +159,7 @@ public class PerfBench {
             }
         }
 
-        final int LOG_INTERVAL = 1_000;
+        final int LOG_INTERVAL = Math.max(1, count / 10);
         for (int i = 1; i <= count; i++) {
             int id = pool.randomId();
             String name = names != null ? names.randomFullName() : "Name" + i;
@@ -200,7 +200,7 @@ public class PerfBench {
             }
         }
 
-        final int LOG_INTERVAL = 1_000;
+        final int LOG_INTERVAL = Math.max(1, count / 10);
         for (int i = 1; i <= count; i++) {
             int sid = pool.randomId();
             String course = "C" + ((i % 200) + 1);
