@@ -47,17 +47,18 @@ public class ReportWriter {
           Map<String, Object> entry = new LinkedHashMap<>();
           entry.put("description", queryDescriptions.getOrDefault(key, ""));
           entry.put("sql_template", querySql.getOrDefault(key, ""));
-          // Convert timings to milliseconds
+          // Convert timings to milliseconds with fractional precision
           double meanMs = s.mean() / 1_000_000.0;
-          long medianMs = Math.round(s.median() / 1_000_000.0);
-          long minMs = Math.round(s.min() / 1_000_000.0);
-          long maxMs = Math.round(s.max() / 1_000_000.0);
+          double medianMs = s.median() / 1_000_000.0;
+          double minMs = s.min() / 1_000_000.0;
+          double maxMs = s.max() / 1_000_000.0;
           double stddevMs = s.stddev() / 1_000_000.0;
           double varianceMs2 = s.variance() / (1_000_000.0 * 1_000_000.0);
+          // Round to sensible decimals (mean/stddev 2dp, others 3dp)
           entry.put("mean_ms", Math.round(meanMs * 100.0) / 100.0);
-          entry.put("median_ms", medianMs);
-          entry.put("min_ms", minMs);
-          entry.put("max_ms", maxMs);
+          entry.put("median_ms", Math.round(medianMs * 1000.0) / 1000.0);
+          entry.put("min_ms", Math.round(minMs * 1000.0) / 1000.0);
+          entry.put("max_ms", Math.round(maxMs * 1000.0) / 1000.0);
           entry.put("stddev_ms", Math.round(stddevMs * 100.0) / 100.0);
           entry.put("variance_ms2", Math.round(varianceMs2 * 100.0) / 100.0);
           if (r != null) {

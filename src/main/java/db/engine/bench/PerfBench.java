@@ -121,14 +121,21 @@ public class PerfBench {
             }
             stats.put(q, agg);
             rowStats.put(q, rowsAgg);
-                // Print in milliseconds
-                double meanMs = agg.mean() / 1_000_000.0;
-                long medianMs = Math.round(agg.median() / 1_000_000.0);
-                long minMs = Math.round(agg.min() / 1_000_000.0);
-                long maxMs = Math.round(agg.max() / 1_000_000.0);
+                // Print in both ms and µs to avoid 0.000ms for ultra-fast ops
+                double meanNs = agg.mean();
+                double medNs = agg.median();
+                double minNs = agg.min();
+                double maxNs = agg.max();
+                double meanMs = meanNs / 1_000_000.0;
+                double medianMs = medNs / 1_000_000.0;
+                double minMs = minNs / 1_000_000.0;
+                double maxMs = maxNs / 1_000_000.0;
+                double medianUs = medNs / 1_000.0;
+                double minUs = minNs / 1_000.0;
+                double maxUs = maxNs / 1_000.0;
                 System.out.printf(Locale.ROOT,
-                    "%s -> count=%d mean=%.2fms median=%dms min=%dms max=%dms\n",
-                    q, agg.count(), meanMs, medianMs, minMs, maxMs);
+                    "%s -> count=%d mean=%.2fms median=%.3fms (%.1fµs) min=%.3fms (%.1fµs) max=%.3fms (%.1fµs)\n",
+                    q, agg.count(), meanMs, medianMs, medianUs, minMs, minUs, maxMs, maxUs);
         }
 
         ReportWriter writer = new ReportWriter(root.resolve("results"));
