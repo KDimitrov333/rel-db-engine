@@ -41,9 +41,22 @@ public class PerfBench {
         StorageManager storage = new StorageManager(catalog);
         IndexManager index = new IndexManager(catalog, storage);
 
-        // Seed tables if missing; use --reseed to force fresh data.
+        // Seed tables if missing; use --reseed to force fresh data (delete existing .tbl files).
         boolean forceReseed = false;
         for (String a : args) { if ("--reseed".equals(a)) { forceReseed = true; break; } }
+
+        if (forceReseed) {
+            // Proactively remove existing benchmark table files to avoid appending/skew.
+            Path studentsTbl = dataDir.resolve(STUDENTS + ".tbl");
+            Path enrollmentsTbl = dataDir.resolve(ENROLLMENTS + ".tbl");
+            try {
+                java.nio.file.Files.deleteIfExists(studentsTbl);
+                java.nio.file.Files.deleteIfExists(enrollmentsTbl);
+                System.out.println("[reseed] Deleted existing table files: " + studentsTbl + ", " + enrollmentsTbl);
+            } catch (Exception e) {
+                System.err.println("[reseed] Warning: failed to delete table files: " + e.getMessage());
+            }
+        }
         boolean studentsExists = catalog.getTableSchema(STUDENTS) != null && fileExists(catalog.getTableSchema(STUDENTS));
         boolean enrollmentsExists = catalog.getTableSchema(ENROLLMENTS) != null && fileExists(catalog.getTableSchema(ENROLLMENTS));
 
